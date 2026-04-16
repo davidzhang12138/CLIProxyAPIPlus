@@ -409,7 +409,9 @@ func isAuthBlockedForModel(auth *Auth, model string, now time.Time) (bool, block
 				return false, blockReasonNone, time.Time{}
 			}
 		}
-		return false, blockReasonNone, time.Time{}
+		// Model state not found in ModelStates — fall through to check
+		// auth-level cooldown as a safety net (e.g. when ModelStates were
+		// cleared by a stale Update).
 	}
 	if auth.Unavailable && auth.NextRetryAfter.After(now) {
 		next := auth.NextRetryAfter

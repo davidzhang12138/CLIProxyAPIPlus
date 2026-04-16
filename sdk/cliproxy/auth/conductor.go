@@ -1124,6 +1124,23 @@ func (m *Manager) Update(ctx context.Context, auth *Auth) (*Auth, error) {
 		if !existing.Disabled && existing.Status != StatusDisabled && !auth.Disabled && auth.Status != StatusDisabled {
 			if len(auth.ModelStates) == 0 && len(existing.ModelStates) > 0 {
 				auth.ModelStates = existing.ModelStates
+			} else if len(existing.ModelStates) > 0 && len(auth.ModelStates) > 0 {
+				// Merge per-model: preserve existing cooldown states that the
+				// incoming (potentially stale) clone does not carry.
+				now := time.Now()
+				for model, existingState := range existing.ModelStates {
+					if existingState == nil {
+						continue
+					}
+					incomingState := auth.ModelStates[model]
+					if existingState.Unavailable && existingState.NextRetryAfter.After(now) {
+						// Existing has an active cooldown for this model.
+						if incomingState == nil || !incomingState.Unavailable || incomingState.NextRetryAfter.Before(existingState.NextRetryAfter) {
+							// Incoming either lacks a cooldown or has an earlier (stale) one — keep existing.
+							auth.ModelStates[model] = existingState
+						}
+					}
+				}
 			}
 		}
 	}
