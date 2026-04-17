@@ -299,3 +299,50 @@ func TestDefaultQuotaForNewToken(t *testing.T) {
 		t.Errorf("expected default QuotaRemaining 1.0, got %f", m.QuotaRemaining)
 	}
 }
+
+func TestTokenScorer_ExportImport(t *testing.T) {
+	s := NewTokenScorer()
+	s.RecordRequest("tok-1", true, 100*time.Millisecond)
+	s.RecordRequest("tok-1", true, 200*time.Millisecond)
+	s.RecordRequest("tok-1", false, 500*time.Millisecond)
+	s.SetQuotaRemaining("tok-1", 0.75)
+	s.RecordRequest("tok-2", true, 50*time.Millisecond)
+
+	entries := s.ExportMetrics()
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(entries))
+	}
+
+	s2 := NewTokenScorer()
+	s2.ImportMetrics(entries)
+
+	m1 := s2.GetMetrics("tok-1")
+	if m1 == nil {
+		t.Fatal("tok-1 metrics should exist after import")
+	}
+	if m1.TotalRequests != 3 {
+		t.Errorf("expected 3 total requests, got %d", m1.TotalRequests)
+	}
+	if m1.FailCount != 1 {
+		t.Errorf("expected 1 fail count, got %d", m1.FailCount)
+	}
+	if m1.QuotaRemaining != 0.75 {
+		t.Errorf("expected quota 0.75, got %f", m1.QuotaRemaining)
+	}
+
+	m2 := s2.GetMetrics("tok-2")
+	if m2 == nil {
+		t.Fatal("tok-2 metrics should exist after import")
+	}
+	if m2.TotalRequests != 1 {
+		t.Errorf("expected 1 total request, got %d", m2.TotalRequests)
+	}
+}
+
+func TestTokenScorer_ExportEmpty(t *testing.T) {
+	s := NewTokenScorer()
+	entries := s.ExportMetrics()
+	if len(entries) != 0 {
+		t.Fatalf("expected 0 entries, got %d", len(entries))
+	}
+}

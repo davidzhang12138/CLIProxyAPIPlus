@@ -4,6 +4,8 @@ import (
 	"math"
 	"sync"
 	"time"
+
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/state"
 )
 
 // TokenMetrics holds performance metrics for a single token.
@@ -184,4 +186,45 @@ func (s *TokenScorer) ResetAllMetrics() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.metrics = make(map[string]*TokenMetrics)
+}
+
+// ExportMetrics returns a snapshot of all token metrics.
+func (s *TokenScorer) ExportMetrics() []state.TokenMetricsEntry {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	entries := make([]state.TokenMetricsEntry, 0, len(s.metrics))
+	for tokenKey, m := range s.metrics {
+		entries = append(entries, state.TokenMetricsEntry{
+			TokenKey:       tokenKey,
+			SuccessRate:    m.SuccessRate,
+			AvgLatency:     m.AvgLatency,
+			QuotaRemaining: m.QuotaRemaining,
+			LastUsed:       m.LastUsed,
+			FailCount:      m.FailCount,
+			TotalRequests:  m.TotalRequests,
+			SuccessCount:   m.successCount,
+			TotalLatency:   m.totalLatency,
+		})
+	}
+	return entries
+}
+
+// ImportMetrics restores token metrics from persisted entries.
+func (s *TokenScorer) ImportMetrics(entries []state.TokenMetricsEntry) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, e := range entries {
+		s.metrics[e.TokenKey] = &TokenMetrics{
+			SuccessRate:    e.SuccessRate,
+			AvgLatency:     e.AvgLatency,
+			QuotaRemaining: e.QuotaRemaining,
+			LastUsed:       e.LastUsed,
+			FailCount:      e.FailCount,
+			TotalRequests:  e.TotalRequests,
+			successCount:   e.SuccessCount,
+			totalLatency:   e.TotalLatency,
+		}
+	}
 }
