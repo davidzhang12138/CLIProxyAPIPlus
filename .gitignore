@@ -24,6 +24,7 @@ objectstore/*
 
 # Static assets
 static/*
+!static/.gitkeep
 
 # Authentication data
 auths/*
