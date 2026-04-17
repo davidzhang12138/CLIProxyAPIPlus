@@ -82,16 +82,14 @@ CREATE TABLE IF NOT EXISTS %s (
 );
 
 CREATE TABLE IF NOT EXISTS %s (
-    stat_date       TEXT NOT NULL PRIMARY KEY,
-    total_requests  BIGINT DEFAULT 0,
-    success_count   BIGINT DEFAULT 0,
-    failure_count   BIGINT DEFAULT 0,
-    total_tokens    BIGINT DEFAULT 0,
-    updated_at      TIMESTAMPTZ DEFAULT NOW()
+    id          INT PRIMARY KEY DEFAULT 1,
+    snapshot    JSONB NOT NULL,
+    updated_at  TIMESTAMPTZ DEFAULT NOW(),
+    CHECK (id = 1)
 );`,
 		s.tableName("runtime_cooldowns"),
 		s.tableName("runtime_token_metrics"),
-		s.tableName("runtime_request_stats"),
+		s.tableName("runtime_usage_snapshot"),
 	)
 
 	_, err := s.db.ExecContext(ctx, ddl)
@@ -225,60 +223,34 @@ func (s *PostgresStateStore) LoadTokenMetrics(ctx context.Context) ([]TokenMetri
 	return entries, rows.Err()
 }
 
-// SaveRequestStats replaces all daily request statistics.
-func (s *PostgresStateStore) SaveRequestStats(ctx context.Context, stats []RequestStatsEntry) error {
-	if len(stats) == 0 {
-		_, err := s.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s", s.tableName("runtime_request_stats")))
-		return err
+// SaveUsageSnapshot upserts the full usage statistics as a JSON blob.
+func (s *PostgresStateStore) SaveUsageSnapshot(ctx context.Context, snapshot []byte) error {
+	if len(snapshot) == 0 {
+		return nil
 	}
-
-	tx, err := s.db.BeginTx(ctx, nil)
+	_, err := s.db.ExecContext(ctx, fmt.Sprintf(
+		`INSERT INTO %s (id, snapshot, updated_at) VALUES (1, $1, NOW())
+		 ON CONFLICT (id) DO UPDATE SET snapshot = $1, updated_at = NOW()`,
+		s.tableName("runtime_usage_snapshot"),
+	), snapshot)
 	if err != nil {
-		return fmt.Errorf("state store: begin tx: %w", err)
+		return fmt.Errorf("state store: save usage snapshot: %w", err)
 	}
-	defer tx.Rollback()
-
-	if _, err = tx.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s", s.tableName("runtime_request_stats"))); err != nil {
-		return fmt.Errorf("state store: truncate request stats: %w", err)
-	}
-
-	stmt, err := tx.PrepareContext(ctx, fmt.Sprintf(
-		`INSERT INTO %s (stat_date, total_requests, success_count, failure_count, total_tokens, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, NOW())`,
-		s.tableName("runtime_request_stats"),
-	))
-	if err != nil {
-		return fmt.Errorf("state store: prepare stats insert: %w", err)
-	}
-	defer stmt.Close()
-
-	for _, st := range stats {
-		if _, err = stmt.ExecContext(ctx, st.StatDate, st.TotalRequests, st.SuccessCount, st.FailureCount, st.TotalTokens); err != nil {
-			return fmt.Errorf("state store: insert stats %s: %w", st.StatDate, err)
-		}
-	}
-
-	return tx.Commit()
+	return nil
 }
 
-// LoadRequestStats reads all request statistics entries.
-func (s *PostgresStateStore) LoadRequestStats(ctx context.Context) ([]RequestStatsEntry, error) {
-	rows, err := s.db.QueryContext(ctx, fmt.Sprintf(
-		"SELECT stat_date, total_requests, success_count, failure_count, total_tokens FROM %s",
-		s.tableName("runtime_request_stats"),
-	))
+// LoadUsageSnapshot reads the stored usage snapshot JSON blob.
+func (s *PostgresStateStore) LoadUsageSnapshot(ctx context.Context) ([]byte, error) {
+	var data []byte
+	err := s.db.QueryRowContext(ctx, fmt.Sprintf(
+		"SELECT snapshot FROM %s WHERE id = 1",
+		s.tableName("runtime_usage_snapshot"),
+	)).Scan(&data)
 	if err != nil {
-		return nil, fmt.Errorf("state store: query request stats: %w", err)
-	}
-	defer rows.Close()
-
-	var entries []RequestStatsEntry
-	for rows.Next() {
-		var e RequestStatsEntry
-		if err = rows.Scan(&e.StatDate, &e.TotalRequests, &e.SuccessCount, &e.FailureCount, &e.TotalTokens); err != nil {
-			return nil, fmt.Errorf("state store: scan request stats: %w", err)
+		if err.Error() == "sql: no rows in result set" {
+			return nil, nil
 		}
-		entries = append(entries, e)
+		return nil, fmt.Errorf("state store: load usage snapshot: %w", err)
 	}
-	return entries, rows.Err()
+	return data, nil
 }

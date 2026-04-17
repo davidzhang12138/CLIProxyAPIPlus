@@ -24,8 +24,8 @@ type Syncer struct {
 	ImportCooldowns func([]CooldownEntry)
 	ExportMetrics   func() []TokenMetricsEntry
 	ImportMetrics   func([]TokenMetricsEntry)
-	ExportStats     func() []RequestStatsEntry
-	ImportStats     func([]RequestStatsEntry)
+	ExportUsage     func() []byte   // full usage snapshot as JSON
+	ImportUsage     func([]byte)    // restore from JSON snapshot
 }
 
 // NewSyncer creates a new state syncer.
@@ -64,13 +64,13 @@ func (s *Syncer) LoadState(ctx context.Context) {
 		}
 	}
 
-	if s.ImportStats != nil {
-		entries, err := s.store.LoadRequestStats(ctx)
+	if s.ImportUsage != nil {
+		data, err := s.store.LoadUsageSnapshot(ctx)
 		if err != nil {
-			log.Warnf("state syncer: failed to load request stats: %v", err)
-		} else if len(entries) > 0 {
-			s.ImportStats(entries)
-			log.Infof("state syncer: restored %d request stats entries", len(entries))
+			log.Warnf("state syncer: failed to load usage snapshot: %v", err)
+		} else if len(data) > 0 {
+			s.ImportUsage(data)
+			log.Infof("state syncer: restored usage snapshot (%d bytes)", len(data))
 		}
 	}
 }
@@ -122,10 +122,10 @@ func (s *Syncer) flush() {
 		}
 	}
 
-	if s.ExportStats != nil {
-		entries := s.ExportStats()
-		if err := s.store.SaveRequestStats(ctx, entries); err != nil {
-			log.Warnf("state syncer: flush request stats failed: %v", err)
+	if s.ExportUsage != nil {
+		data := s.ExportUsage()
+		if err := s.store.SaveUsageSnapshot(ctx, data); err != nil {
+			log.Warnf("state syncer: flush usage snapshot failed: %v", err)
 		}
 	}
 }

@@ -9,13 +9,13 @@ import (
 
 // mockStateStore is an in-memory StateStore for testing.
 type mockStateStore struct {
-	mu       sync.Mutex
-	cooldowns []CooldownEntry
-	metrics   []TokenMetricsEntry
-	stats     []RequestStatsEntry
-	initErr   error
-	saveErr   error
-	loadErr   error
+	mu            sync.Mutex
+	cooldowns     []CooldownEntry
+	metrics       []TokenMetricsEntry
+	usageSnapshot []byte
+	initErr       error
+	saveErr       error
+	loadErr       error
 }
 
 func (m *mockStateStore) Init(ctx context.Context) error { return m.initErr }
@@ -65,67 +65,65 @@ func (m *mockStateStore) LoadTokenMetrics(_ context.Context) ([]TokenMetricsEntr
 	return out, nil
 }
 
-func (m *mockStateStore) SaveRequestStats(_ context.Context, s []RequestStatsEntry) error {
+func (m *mockStateStore) SaveUsageSnapshot(_ context.Context, data []byte) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.saveErr != nil {
 		return m.saveErr
 	}
-	m.stats = make([]RequestStatsEntry, len(s))
-	copy(m.stats, s)
+	m.usageSnapshot = make([]byte, len(data))
+	copy(m.usageSnapshot, data)
 	return nil
 }
 
-func (m *mockStateStore) LoadRequestStats(_ context.Context) ([]RequestStatsEntry, error) {
+func (m *mockStateStore) LoadUsageSnapshot(_ context.Context) ([]byte, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.loadErr != nil {
 		return nil, m.loadErr
 	}
-	out := make([]RequestStatsEntry, len(m.stats))
-	copy(out, m.stats)
+	if m.usageSnapshot == nil {
+		return nil, nil
+	}
+	out := make([]byte, len(m.usageSnapshot))
+	copy(out, m.usageSnapshot)
 	return out, nil
 }
 
 func TestSyncer_FlushAndLoad(t *testing.T) {
 	store := &mockStateStore{}
 
-	// Simulated in-memory state
 	cooldowns := []CooldownEntry{
 		{TokenKey: "tok-1", ExpiresAt: time.Now().Add(10 * time.Minute), Reason: "rate_limit"},
 	}
-	stats := []RequestStatsEntry{
-		{StatDate: "2026-04-17", TotalRequests: 100, SuccessCount: 90, FailureCount: 10, TotalTokens: 5000},
-	}
+	usageJSON := []byte(`{"total_requests":100,"success_count":90}`)
 
 	var imported []CooldownEntry
-	var importedStats []RequestStatsEntry
+	var importedUsage []byte
 
 	syncer := NewSyncer(store, SyncerConfig{FlushInterval: 50 * time.Millisecond})
 	syncer.ExportCooldowns = func() []CooldownEntry { return cooldowns }
 	syncer.ImportCooldowns = func(e []CooldownEntry) { imported = e }
-	syncer.ExportStats = func() []RequestStatsEntry { return stats }
-	syncer.ImportStats = func(e []RequestStatsEntry) { importedStats = e }
+	syncer.ExportUsage = func() []byte { return usageJSON }
+	syncer.ImportUsage = func(data []byte) { importedUsage = data }
 
-	// Start and wait for at least one flush
 	syncer.Start()
 	time.Sleep(120 * time.Millisecond)
 	syncer.Stop()
 
-	// Verify data was flushed to store
 	store.mu.Lock()
 	if len(store.cooldowns) != 1 {
 		t.Errorf("expected 1 cooldown in store, got %d", len(store.cooldowns))
 	}
-	if len(store.stats) != 1 {
-		t.Errorf("expected 1 stat in store, got %d", len(store.stats))
+	if len(store.usageSnapshot) == 0 {
+		t.Error("expected usage snapshot in store")
 	}
 	store.mu.Unlock()
 
-	// Now simulate restart: load state back
+	// Simulate restart
 	syncer2 := NewSyncer(store, SyncerConfig{FlushInterval: time.Hour})
 	syncer2.ImportCooldowns = func(e []CooldownEntry) { imported = e }
-	syncer2.ImportStats = func(e []RequestStatsEntry) { importedStats = e }
+	syncer2.ImportUsage = func(data []byte) { importedUsage = data }
 
 	syncer2.LoadState(context.Background())
 
@@ -135,8 +133,8 @@ func TestSyncer_FlushAndLoad(t *testing.T) {
 	if imported[0].TokenKey != "tok-1" {
 		t.Errorf("expected token key tok-1, got %s", imported[0].TokenKey)
 	}
-	if len(importedStats) != 1 {
-		t.Errorf("expected 1 imported stat, got %d", len(importedStats))
+	if len(importedUsage) == 0 {
+		t.Error("expected usage snapshot to be restored")
 	}
 }
 
@@ -144,13 +142,12 @@ func TestSyncer_NilExporters(t *testing.T) {
 	store := &mockStateStore{}
 	syncer := NewSyncer(store, SyncerConfig{FlushInterval: 50 * time.Millisecond})
 
-	// No exporters set — should not panic
 	syncer.Start()
 	time.Sleep(80 * time.Millisecond)
 	syncer.Stop()
 
 	syncer2 := NewSyncer(store, SyncerConfig{})
-	syncer2.LoadState(context.Background()) // should not panic
+	syncer2.LoadState(context.Background())
 }
 
 func TestSyncer_DefaultFlushInterval(t *testing.T) {
@@ -164,14 +161,13 @@ func TestSyncer_GracefulShutdown(t *testing.T) {
 	store := &mockStateStore{}
 	flushCount := 0
 
-	syncer := NewSyncer(store, SyncerConfig{FlushInterval: time.Hour}) // long interval
+	syncer := NewSyncer(store, SyncerConfig{FlushInterval: time.Hour})
 	syncer.ExportCooldowns = func() []CooldownEntry {
 		flushCount++
 		return []CooldownEntry{{TokenKey: "tok", ExpiresAt: time.Now().Add(time.Hour), Reason: "test"}}
 	}
 
 	syncer.Start()
-	// Stop immediately — should trigger exactly one final flush
 	syncer.Stop()
 
 	if flushCount != 1 {

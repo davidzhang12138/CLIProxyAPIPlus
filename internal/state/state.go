@@ -18,9 +18,9 @@ type StateStore interface {
 	SaveTokenMetrics(ctx context.Context, metrics []TokenMetricsEntry) error
 	LoadTokenMetrics(ctx context.Context) ([]TokenMetricsEntry, error)
 
-	// Request Stats
-	SaveRequestStats(ctx context.Context, stats []RequestStatsEntry) error
-	LoadRequestStats(ctx context.Context) ([]RequestStatsEntry, error)
+	// Usage Snapshot (full JSON blob)
+	SaveUsageSnapshot(ctx context.Context, snapshot []byte) error
+	LoadUsageSnapshot(ctx context.Context) ([]byte, error)
 
 	// Close releases resources.
 	Close() error
@@ -44,13 +44,4 @@ type TokenMetricsEntry struct {
 	TotalRequests  int
 	SuccessCount   int
 	TotalLatency   float64
-}
-
-// RequestStatsEntry represents persisted daily request statistics.
-type RequestStatsEntry struct {
-	StatDate      string // "2006-01-02" format
-	TotalRequests int64
-	SuccessCount  int64
-	FailureCount  int64
-	TotalTokens   int64
 }

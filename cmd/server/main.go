@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -708,8 +709,23 @@ func main() {
 					syncer.ImportCooldowns = cooldownMgr.ImportCooldowns
 
 					reqStats := usage.GetRequestStatistics()
-					syncer.ExportStats = reqStats.ExportDailyStats
-					syncer.ImportStats = reqStats.ImportDailyStats
+					syncer.ExportUsage = func() []byte {
+						snapshot := reqStats.Snapshot()
+						data, err := json.Marshal(snapshot)
+						if err != nil {
+							log.Warnf("state syncer: marshal usage snapshot: %v", err)
+							return nil
+						}
+						return data
+					}
+					syncer.ImportUsage = func(data []byte) {
+						var snapshot usage.StatisticsSnapshot
+						if err := json.Unmarshal(data, &snapshot); err != nil {
+							log.Warnf("state syncer: unmarshal usage snapshot: %v", err)
+							return
+						}
+						reqStats.MergeSnapshot(snapshot)
+					}
 
 					initCtx, initCancel := context.WithTimeout(context.Background(), 30*time.Second)
 					defer initCancel()
