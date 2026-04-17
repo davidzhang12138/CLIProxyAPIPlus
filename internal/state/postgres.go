@@ -4,11 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"regexp"
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	log "github.com/sirupsen/logrus"
 )
+
+var validSchemaName = regexp.MustCompile(`^[a-zA-Z0-9_]+$`)
 
 // PostgresStateStore implements StateStore using PostgreSQL.
 type PostgresStateStore struct {
@@ -19,6 +22,9 @@ type PostgresStateStore struct {
 
 // NewPostgresStateStore creates a new PostgresStateStore with its own connection.
 func NewPostgresStateStore(dsn string, schema string) (*PostgresStateStore, error) {
+	if schema != "" && !validSchemaName.MatchString(schema) {
+		return nil, fmt.Errorf("state store: invalid schema name %q (must match [a-zA-Z0-9_]+)", schema)
+	}
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("state store: open database: %w", err)
@@ -33,8 +39,11 @@ func NewPostgresStateStore(dsn string, schema string) (*PostgresStateStore, erro
 }
 
 // NewPostgresStateStoreFromDB creates a PostgresStateStore using an existing *sql.DB.
-func NewPostgresStateStoreFromDB(db *sql.DB, schema string) *PostgresStateStore {
-	return &PostgresStateStore{db: db, schema: schema, ownsDB: false}
+func NewPostgresStateStoreFromDB(db *sql.DB, schema string) (*PostgresStateStore, error) {
+	if schema != "" && !validSchemaName.MatchString(schema) {
+		return nil, fmt.Errorf("state store: invalid schema name %q (must match [a-zA-Z0-9_]+)", schema)
+	}
+	return &PostgresStateStore{db: db, schema: schema, ownsDB: false}, nil
 }
 
 func (s *PostgresStateStore) tableName(base string) string {
@@ -73,15 +82,12 @@ CREATE TABLE IF NOT EXISTS %s (
 );
 
 CREATE TABLE IF NOT EXISTS %s (
-    stat_date       DATE NOT NULL,
-    api_key         TEXT NOT NULL DEFAULT '',
-    model           TEXT NOT NULL DEFAULT '',
+    stat_date       TEXT NOT NULL PRIMARY KEY,
     total_requests  BIGINT DEFAULT 0,
     success_count   BIGINT DEFAULT 0,
     failure_count   BIGINT DEFAULT 0,
     total_tokens    BIGINT DEFAULT 0,
-    updated_at      TIMESTAMPTZ DEFAULT NOW(),
-    PRIMARY KEY (stat_date, api_key, model)
+    updated_at      TIMESTAMPTZ DEFAULT NOW()
 );`,
 		s.tableName("runtime_cooldowns"),
 		s.tableName("runtime_token_metrics"),
@@ -237,8 +243,8 @@ func (s *PostgresStateStore) SaveRequestStats(ctx context.Context, stats []Reque
 	}
 
 	stmt, err := tx.PrepareContext(ctx, fmt.Sprintf(
-		`INSERT INTO %s (stat_date, api_key, model, total_requests, success_count, failure_count, total_tokens, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())`,
+		`INSERT INTO %s (stat_date, total_requests, success_count, failure_count, total_tokens, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, NOW())`,
 		s.tableName("runtime_request_stats"),
 	))
 	if err != nil {
@@ -247,7 +253,7 @@ func (s *PostgresStateStore) SaveRequestStats(ctx context.Context, stats []Reque
 	defer stmt.Close()
 
 	for _, st := range stats {
-		if _, err = stmt.ExecContext(ctx, st.StatDate, "", "", st.TotalRequests, st.SuccessCount, st.FailureCount, st.TotalTokens); err != nil {
+		if _, err = stmt.ExecContext(ctx, st.StatDate, st.TotalRequests, st.SuccessCount, st.FailureCount, st.TotalTokens); err != nil {
 			return fmt.Errorf("state store: insert stats %s: %w", st.StatDate, err)
 		}
 	}
@@ -269,11 +275,9 @@ func (s *PostgresStateStore) LoadRequestStats(ctx context.Context) ([]RequestSta
 	var entries []RequestStatsEntry
 	for rows.Next() {
 		var e RequestStatsEntry
-		var statDate time.Time
-		if err = rows.Scan(&statDate, &e.TotalRequests, &e.SuccessCount, &e.FailureCount, &e.TotalTokens); err != nil {
+		if err = rows.Scan(&e.StatDate, &e.TotalRequests, &e.SuccessCount, &e.FailureCount, &e.TotalTokens); err != nil {
 			return nil, fmt.Errorf("state store: scan request stats: %w", err)
 		}
-		e.StatDate = statDate.Format("2006-01-02")
 		entries = append(entries, e)
 	}
 	return entries, rows.Err()
