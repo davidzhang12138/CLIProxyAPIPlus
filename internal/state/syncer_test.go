@@ -9,13 +9,14 @@ import (
 
 // mockStateStore is an in-memory StateStore for testing.
 type mockStateStore struct {
-	mu            sync.Mutex
-	cooldowns     []CooldownEntry
-	metrics       []TokenMetricsEntry
-	usageSnapshot []byte
-	initErr       error
-	saveErr       error
-	loadErr       error
+	mu               sync.Mutex
+	cooldowns        []CooldownEntry
+	metrics          []TokenMetricsEntry
+	usageSnapshot    []byte
+	authCooldowns    []byte
+	initErr          error
+	saveErr          error
+	loadErr          error
 }
 
 func (m *mockStateStore) Init(ctx context.Context) error { return m.initErr }
@@ -87,6 +88,31 @@ func (m *mockStateStore) LoadUsageSnapshot(_ context.Context) ([]byte, error) {
 	}
 	out := make([]byte, len(m.usageSnapshot))
 	copy(out, m.usageSnapshot)
+	return out, nil
+}
+
+func (m *mockStateStore) SaveAuthCooldowns(_ context.Context, data []byte) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.saveErr != nil {
+		return m.saveErr
+	}
+	m.authCooldowns = make([]byte, len(data))
+	copy(m.authCooldowns, data)
+	return nil
+}
+
+func (m *mockStateStore) LoadAuthCooldowns(_ context.Context) ([]byte, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.loadErr != nil {
+		return nil, m.loadErr
+	}
+	if m.authCooldowns == nil {
+		return nil, nil
+	}
+	out := make([]byte, len(m.authCooldowns))
+	copy(out, m.authCooldowns)
 	return out, nil
 }
 

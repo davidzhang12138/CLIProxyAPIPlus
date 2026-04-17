@@ -20,12 +20,14 @@ type Syncer struct {
 	doneCh chan struct{}
 
 	// Adapter functions — set by the caller to bridge in-memory managers.
-	ExportCooldowns func() []CooldownEntry
-	ImportCooldowns func([]CooldownEntry)
-	ExportMetrics   func() []TokenMetricsEntry
-	ImportMetrics   func([]TokenMetricsEntry)
-	ExportUsage     func() []byte   // full usage snapshot as JSON
-	ImportUsage     func([]byte)    // restore from JSON snapshot
+	ExportCooldowns     func() []CooldownEntry
+	ImportCooldowns     func([]CooldownEntry)
+	ExportMetrics       func() []TokenMetricsEntry
+	ImportMetrics       func([]TokenMetricsEntry)
+	ExportUsage         func() []byte   // full usage snapshot as JSON
+	ImportUsage         func([]byte)    // restore from JSON snapshot
+	ExportAuthCooldowns func() []byte   // auth cooldown state as JSON
+	ImportAuthCooldowns func([]byte)    // restore auth cooldown state
 }
 
 // NewSyncer creates a new state syncer.
@@ -73,7 +75,20 @@ func (s *Syncer) LoadState(ctx context.Context) {
 			log.Infof("state syncer: restored usage snapshot (%d bytes)", len(data))
 		}
 	}
+
+	if s.ImportAuthCooldowns != nil {
+		data, err := s.store.LoadAuthCooldowns(ctx)
+		if err != nil {
+			log.Warnf("state syncer: failed to load auth cooldowns: %v", err)
+		} else if len(data) > 0 {
+			s.ImportAuthCooldowns(data)
+			log.Infof("state syncer: restored auth cooldown state (%d bytes)", len(data))
+		}
+	}
 }
+
+// Store returns the underlying StateStore.
+func (s *Syncer) Store() StateStore { return s.store }
 
 // Start begins the periodic flush goroutine.
 func (s *Syncer) Start() {
@@ -126,6 +141,13 @@ func (s *Syncer) flush() {
 		data := s.ExportUsage()
 		if err := s.store.SaveUsageSnapshot(ctx, data); err != nil {
 			log.Warnf("state syncer: flush usage snapshot failed: %v", err)
+		}
+	}
+
+	if s.ExportAuthCooldowns != nil {
+		data := s.ExportAuthCooldowns()
+		if err := s.store.SaveAuthCooldowns(ctx, data); err != nil {
+			log.Warnf("state syncer: flush auth cooldowns failed: %v", err)
 		}
 	}
 }

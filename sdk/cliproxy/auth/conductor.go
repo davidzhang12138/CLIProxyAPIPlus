@@ -3473,3 +3473,102 @@ func (m *Manager) HttpRequest(ctx context.Context, auth *Auth, req *http.Request
 	}
 	return exec.HttpRequest(ctx, auth, req)
 }
+
+// AuthCooldownSnapshot captures the cooldown-relevant runtime state for a single auth entry.
+type AuthCooldownSnapshot struct {
+	AuthID         string                  `json:"auth_id"`
+	Unavailable    bool                    `json:"unavailable,omitempty"`
+	NextRetryAfter time.Time              `json:"next_retry_after,omitempty"`
+	Quota          QuotaState             `json:"quota,omitempty"`
+	ModelStates    map[string]*ModelState  `json:"model_states,omitempty"`
+}
+
+// ExportCooldownStates returns cooldown state for all auth entries that have active cooldowns.
+func (m *Manager) ExportCooldownStates() []AuthCooldownSnapshot {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	now := time.Now()
+	var snapshots []AuthCooldownSnapshot
+	for _, auth := range m.auths {
+		hasState := auth.Unavailable ||
+			(!auth.NextRetryAfter.IsZero() && auth.NextRetryAfter.After(now)) ||
+			auth.Quota.Exceeded
+		hasModelState := false
+		for _, ms := range auth.ModelStates {
+			if ms.Unavailable || (ms.NextRetryAfter.After(now)) || ms.Quota.Exceeded {
+				hasModelState = true
+				break
+			}
+		}
+		if !hasState && !hasModelState {
+			continue
+		}
+
+		snap := AuthCooldownSnapshot{
+			AuthID:         auth.ID,
+			Unavailable:    auth.Unavailable,
+			NextRetryAfter: auth.NextRetryAfter,
+			Quota:          auth.Quota,
+		}
+		if hasModelState {
+			snap.ModelStates = make(map[string]*ModelState, len(auth.ModelStates))
+			for model, ms := range auth.ModelStates {
+				if ms.Unavailable || ms.NextRetryAfter.After(now) || ms.Quota.Exceeded {
+					snap.ModelStates[model] = ms.Clone()
+				}
+			}
+		}
+		snapshots = append(snapshots, snap)
+	}
+	return snapshots
+}
+
+// RestoreCooldownStates applies persisted cooldown state back to auth entries.
+// Only entries that still exist in the manager are updated. Expired state is skipped.
+func (m *Manager) RestoreCooldownStates(snapshots []AuthCooldownSnapshot) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	now := time.Now()
+	restored := 0
+	for _, snap := range snapshots {
+		auth, ok := m.auths[snap.AuthID]
+		if !ok {
+			continue
+		}
+
+		changed := false
+
+		// Restore auth-level cooldown
+		if snap.NextRetryAfter.After(now) {
+			auth.Unavailable = snap.Unavailable
+			auth.NextRetryAfter = snap.NextRetryAfter
+			changed = true
+		}
+		if snap.Quota.Exceeded && snap.Quota.NextRecoverAt.After(now) {
+			auth.Quota = snap.Quota
+			changed = true
+		}
+
+		// Restore per-model cooldown
+		for model, ms := range snap.ModelStates {
+			if ms.NextRetryAfter.After(now) || (ms.Quota.Exceeded && ms.Quota.NextRecoverAt.After(now)) {
+				if auth.ModelStates == nil {
+					auth.ModelStates = make(map[string]*ModelState)
+				}
+				auth.ModelStates[model] = ms.Clone()
+				changed = true
+			}
+		}
+
+		if changed {
+			restored++
+			// Sync scheduler with updated auth
+			if m.scheduler != nil {
+				m.scheduler.upsertAuth(auth.Clone())
+			}
+		}
+	}
+	return restored
+}

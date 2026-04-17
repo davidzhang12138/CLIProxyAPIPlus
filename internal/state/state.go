@@ -22,6 +22,10 @@ type StateStore interface {
 	SaveUsageSnapshot(ctx context.Context, snapshot []byte) error
 	LoadUsageSnapshot(ctx context.Context) ([]byte, error)
 
+	// Auth Cooldown State (full JSON blob)
+	SaveAuthCooldowns(ctx context.Context, data []byte) error
+	LoadAuthCooldowns(ctx context.Context) ([]byte, error)
+
 	// Close releases resources.
 	Close() error
 }

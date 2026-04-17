@@ -13,12 +13,15 @@ import (
 	"io/fs"
 	"net/url"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/joho/godotenv"
 	configaccess "github.com/router-for-me/CLIProxyAPI/v6/internal/access/config_access"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/api"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/auth/kiro"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/buildinfo"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/cmd"
@@ -34,6 +37,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/usage"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/util"
 	sdkAuth "github.com/router-for-me/CLIProxyAPI/v6/sdk/auth"
+	"github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
 	log "github.com/sirupsen/logrus"
 )
@@ -688,6 +692,7 @@ func main() {
 
 			// State persistence syncer.
 			// Independent of PGSTORE_DSN — uses its own DSN from config.
+			var syncer *state.Syncer
 			if cfg.StateStore.Enabled && cfg.StateStore.DSN != "" {
 				stateStore, stateErr := state.NewPostgresStateStore(cfg.StateStore.DSN, cfg.StateStore.Schema)
 				if stateErr != nil {
@@ -700,7 +705,7 @@ func main() {
 						}
 					}
 
-					syncer := state.NewSyncer(stateStore, state.SyncerConfig{
+					syncer = state.NewSyncer(stateStore, state.SyncerConfig{
 						FlushInterval: flushInterval,
 					})
 
@@ -731,6 +736,7 @@ func main() {
 					defer initCancel()
 					if initErr := stateStore.Init(initCtx); initErr != nil {
 						log.Errorf("state store: failed to init tables: %v", initErr)
+						syncer = nil // prevent wiring below
 					} else {
 						syncer.LoadState(initCtx)
 						syncer.Start()
@@ -739,7 +745,70 @@ func main() {
 				}
 			}
 
-			cmd.StartService(cfg, configFilePath, password)
+			// Build the proxy service manually (instead of cmd.StartService)
+			// so we can wire auth cooldown persistence between Build() and Run().
+			builder := cliproxy.NewBuilder().
+				WithConfig(cfg).
+				WithConfigPath(configFilePath).
+				WithLocalManagementPassword(password)
+
+			ctxSignal, cancelSignal := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+			defer cancelSignal()
+
+			runCtx := ctxSignal
+			if password != "" {
+				var keepAliveCancel context.CancelFunc
+				runCtx, keepAliveCancel = context.WithCancel(ctxSignal)
+				builder = builder.WithServerOptions(api.WithKeepAliveEndpoint(10*time.Second, func() {
+					log.Warn("keep-alive endpoint idle for 10s, shutting down")
+					keepAliveCancel()
+				}))
+			}
+
+			service, buildErr := builder.Build()
+			if buildErr != nil {
+				log.Errorf("failed to build proxy service: %v", buildErr)
+				return
+			}
+
+			// Wire auth cooldown export/import now that the Manager exists.
+			if syncer != nil && service.AuthManager() != nil {
+				mgr := service.AuthManager()
+				syncer.ExportAuthCooldowns = func() []byte {
+					snapshots := mgr.ExportCooldownStates()
+					if len(snapshots) == 0 {
+						return nil
+					}
+					data, err := json.Marshal(snapshots)
+					if err != nil {
+						log.Warnf("state syncer: marshal auth cooldowns: %v", err)
+						return nil
+					}
+					return data
+				}
+				syncer.ImportAuthCooldowns = func(data []byte) {
+					var snapshots []coreauth.AuthCooldownSnapshot
+					if err := json.Unmarshal(data, &snapshots); err != nil {
+						log.Warnf("state syncer: unmarshal auth cooldowns: %v", err)
+						return
+					}
+					restored := mgr.RestoreCooldownStates(snapshots)
+					log.Infof("state syncer: restored cooldown state for %d auth entries", restored)
+				}
+
+				// Load auth cooldown state now (after service build, before run)
+				loadCtx, loadCancel := context.WithTimeout(context.Background(), 10*time.Second)
+				if data, loadErr := syncer.Store().LoadAuthCooldowns(loadCtx); loadErr != nil {
+					log.Warnf("state syncer: failed to load auth cooldowns: %v", loadErr)
+				} else if len(data) > 0 {
+					syncer.ImportAuthCooldowns(data)
+				}
+				loadCancel()
+			}
+
+			if runErr := service.Run(runCtx); runErr != nil && !errors.Is(runErr, context.Canceled) {
+				log.Errorf("proxy service exited with error: %v", runErr)
+			}
 		}
 	}
 }

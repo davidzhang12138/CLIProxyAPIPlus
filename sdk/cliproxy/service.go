@@ -92,6 +92,11 @@ type Service struct {
 	wsGateway *wsrelay.Manager
 }
 
+// AuthManager returns the internal auth manager for state persistence.
+func (s *Service) AuthManager() *coreauth.Manager {
+	return s.coreManager
+}
+
 // RegisterUsagePlugin registers a usage plugin on the global usage manager.
 // This allows external code to monitor API usage and token consumption.
 //
