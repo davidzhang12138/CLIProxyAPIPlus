@@ -30,8 +30,8 @@ auths/*
 !auths/.gitkeep
 
 # PG data
-pgdata/*
-!pgdata/.gitkeep
+data/*
+!tata/.gitkeep
 
 # Documentation
 docs/*
