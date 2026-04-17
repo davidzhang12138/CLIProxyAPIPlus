@@ -716,6 +716,7 @@ func main() {
 					reqStats := usage.GetRequestStatistics()
 					syncer.ExportUsage = func() []byte {
 						snapshot := reqStats.Snapshot()
+						snapshot = usage.TrimSnapshot(snapshot, 30) // retain 30 days only
 						data, err := json.Marshal(snapshot)
 						if err != nil {
 							log.Warnf("state syncer: marshal usage snapshot: %v", err)

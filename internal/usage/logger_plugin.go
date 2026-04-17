@@ -482,3 +482,63 @@ func formatHour(hour int) string {
 	hour = hour % 24
 	return fmt.Sprintf("%02d", hour)
 }
+
+// TrimSnapshot removes data older than the given number of days from the snapshot.
+// Global counters are recalculated from the remaining data.
+func TrimSnapshot(snap StatisticsSnapshot, retentionDays int) StatisticsSnapshot {
+	cutoff := time.Now().AddDate(0, 0, -retentionDays)
+	cutoffStr := cutoff.Format("2006-01-02")
+
+	// Trim per-day maps
+	for day := range snap.RequestsByDay {
+		if day < cutoffStr {
+			delete(snap.RequestsByDay, day)
+		}
+	}
+	for day := range snap.TokensByDay {
+		if day < cutoffStr {
+			delete(snap.TokensByDay, day)
+		}
+	}
+
+	// Trim per-API/model request details and recalculate counters
+	var totalReqs, successCount, failureCount, totalTokens int64
+	for apiKey, apiSnap := range snap.APIs {
+		var apiReqs, apiTokens int64
+		for modelName, modelSnap := range apiSnap.Models {
+			filtered := modelSnap.Details[:0]
+			for _, d := range modelSnap.Details {
+				if d.Timestamp.After(cutoff) {
+					filtered = append(filtered, d)
+				}
+			}
+			modelSnap.Details = filtered
+
+			// Recalculate model counters from remaining details
+			modelSnap.TotalRequests = int64(len(filtered))
+			modelSnap.TotalTokens = 0
+			for _, d := range filtered {
+				modelSnap.TotalTokens += d.Tokens.TotalTokens
+				if d.Failed {
+					failureCount++
+				} else {
+					successCount++
+				}
+			}
+			totalReqs += modelSnap.TotalRequests
+			totalTokens += modelSnap.TotalTokens
+			apiReqs += modelSnap.TotalRequests
+			apiTokens += modelSnap.TotalTokens
+			apiSnap.Models[modelName] = modelSnap
+		}
+		apiSnap.TotalRequests = apiReqs
+		apiSnap.TotalTokens = apiTokens
+		snap.APIs[apiKey] = apiSnap
+	}
+
+	snap.TotalRequests = totalReqs
+	snap.SuccessCount = successCount
+	snap.FailureCount = failureCount
+	snap.TotalTokens = totalTokens
+	return snap
+}
