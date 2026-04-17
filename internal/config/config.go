@@ -68,6 +68,9 @@ type Config struct {
 	// DisableCooling disables quota cooldown scheduling when true.
 	DisableCooling bool `yaml:"disable-cooling" json:"disable-cooling"`
 
+	// StateStore enables persistent storage of runtime state (cooldowns, metrics, statistics).
+	StateStore StateStoreConfig `yaml:"state-store" json:"state-store"`
+
 	// AuthAutoRefreshWorkers overrides the size of the core auth auto-refresh worker pool.
 	// When <= 0, the default worker count is used.
 	AuthAutoRefreshWorkers int `yaml:"auth-auto-refresh-workers" json:"auth-auto-refresh-workers"`
@@ -155,6 +158,16 @@ type Config struct {
 	IncognitoBrowser bool `yaml:"incognito-browser" json:"incognito-browser"`
 
 	legacyMigrationPending bool `yaml:"-" json:"-"`
+}
+
+// StateStoreConfig controls persistence of runtime state to the database.
+type StateStoreConfig struct {
+	// Enabled toggles state persistence. When false, runtime state is only in-memory.
+	Enabled bool `yaml:"enabled" json:"enabled"`
+
+	// FlushInterval is the interval between periodic state flushes (e.g., "30s", "1m").
+	// Default: 30s.
+	FlushInterval string `yaml:"flush-interval" json:"flush-interval"`
 }
 
 // ClaudeHeaderDefaults configures default header values injected into Claude API requests.

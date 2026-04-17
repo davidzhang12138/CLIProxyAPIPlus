@@ -28,6 +28,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/registry"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/store"
 	_ "github.com/router-for-me/CLIProxyAPI/v6/internal/translator"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/state"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/tui"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/usage"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/util"
@@ -682,6 +683,44 @@ func main() {
 			if cfg.AuthDir != "" {
 				kiro.InitializeAndStart(cfg.AuthDir, cfg)
 				defer kiro.StopGlobalRefreshManager()
+			}
+
+			// State persistence syncer
+			if cfg.StateStore.Enabled && usePostgresStore && pgStoreDSN != "" {
+				stateStore, stateErr := state.NewPostgresStateStore(pgStoreDSN, pgStoreSchema)
+				if stateErr != nil {
+					log.Errorf("failed to initialize state store: %v", stateErr)
+				} else {
+					flushInterval := 30 * time.Second
+					if cfg.StateStore.FlushInterval != "" {
+						if parsed, parseErr := time.ParseDuration(cfg.StateStore.FlushInterval); parseErr == nil {
+							flushInterval = parsed
+						}
+					}
+
+					syncer := state.NewSyncer(stateStore, state.SyncerConfig{
+						FlushInterval: flushInterval,
+					})
+
+					cooldownMgr := kiro.GetGlobalCooldownManager()
+					syncer.ExportCooldowns = cooldownMgr.ExportCooldowns
+					syncer.ImportCooldowns = cooldownMgr.ImportCooldowns
+
+					reqStats := usage.GetRequestStatistics()
+					syncer.ExportStats = reqStats.ExportDailyStats
+					syncer.ImportStats = reqStats.ImportDailyStats
+
+					initCtx, initCancel := context.WithTimeout(context.Background(), 30*time.Second)
+					if initErr := stateStore.Init(initCtx); initErr != nil {
+						log.Errorf("state store: failed to init tables: %v", initErr)
+					} else if loadErr := syncer.LoadState(initCtx); loadErr != nil {
+						log.Errorf("state store: failed to load state: %v", loadErr)
+					} else {
+						syncer.Start()
+						defer syncer.Stop()
+					}
+					initCancel()
+				}
 			}
 
 			cmd.StartService(cfg, configFilePath, password)
