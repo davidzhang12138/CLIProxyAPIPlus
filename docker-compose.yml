@@ -42,13 +42,10 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - ${CLI_PROXY_PGDATA_PATH:-./pgdata}:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U cliproxy"]
       interval: 5s
       timeout: 3s
       retries: 5
     restart: unless-stopped
-
-volumes:
-  pgdata:

@@ -29,6 +29,10 @@ static/*
 auths/*
 !auths/.gitkeep
 
+# PG data
+pgdata/*
+!pgdata/.gitkeep
+
 # Documentation
 docs/*
 AGENTS.md
