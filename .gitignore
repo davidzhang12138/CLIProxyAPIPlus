@@ -31,7 +31,6 @@ auths/*
 
 # PG data
 data/*
-!data/.gitkeep
 
 # Documentation
 docs/*
