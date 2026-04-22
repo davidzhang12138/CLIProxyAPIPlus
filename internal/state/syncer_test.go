@@ -9,14 +9,14 @@ import (
 
 // mockStateStore is an in-memory StateStore for testing.
 type mockStateStore struct {
-	mu               sync.Mutex
-	cooldowns        []CooldownEntry
-	metrics          []TokenMetricsEntry
-	usageSnapshot    []byte
-	authCooldowns    []byte
-	initErr          error
-	saveErr          error
-	loadErr          error
+	mu            sync.Mutex
+	cooldowns     []CooldownEntry
+	metrics       []TokenMetricsEntry
+	usageSnapshot []byte
+	authCooldowns []byte
+	initErr       error
+	saveErr       error
+	loadErr       error
 }
 
 func (m *mockStateStore) Init(ctx context.Context) error { return m.initErr }

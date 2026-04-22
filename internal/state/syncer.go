@@ -24,10 +24,10 @@ type Syncer struct {
 	ImportCooldowns     func([]CooldownEntry)
 	ExportMetrics       func() []TokenMetricsEntry
 	ImportMetrics       func([]TokenMetricsEntry)
-	ExportUsage         func() []byte   // full usage snapshot as JSON
-	ImportUsage         func([]byte)    // restore from JSON snapshot
-	ExportAuthCooldowns func() []byte   // auth cooldown state as JSON
-	ImportAuthCooldowns func([]byte)    // restore auth cooldown state
+	ExportUsage         func() []byte // full usage snapshot as JSON
+	ImportUsage         func([]byte)  // restore from JSON snapshot
+	ExportAuthCooldowns func() []byte // auth cooldown state as JSON
+	ImportAuthCooldowns func([]byte)  // restore auth cooldown state
 }
 
 // NewSyncer creates a new state syncer.

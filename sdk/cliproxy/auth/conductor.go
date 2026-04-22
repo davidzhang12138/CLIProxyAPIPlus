@@ -64,8 +64,13 @@ const (
 	refreshMaxConcurrency = 16
 	refreshPendingBackoff = time.Minute
 	refreshFailureBackoff = 1 * time.Minute
-	quotaBackoffBase      = time.Second
-	quotaBackoffMax       = 30 * time.Minute
+	// refreshIneffectiveBackoff throttles refresh attempts when an executor returns
+	// success but the auth still evaluates as needing refresh (e.g. token expiry
+	// wasn't updated). Without this guard, the auto-refresh loop can tight-loop and
+	// burn CPU at idle.
+	refreshIneffectiveBackoff = 30 * time.Second
+	quotaBackoffBase          = time.Second
+	quotaBackoffMax           = 30 * time.Minute
 )
 
 var quotaCooldownDisabled atomic.Bool
@@ -3265,6 +3270,9 @@ func (m *Manager) refreshAuth(ctx context.Context, id string) {
 	// If the Authenticator did not set it (zero value), shouldRefresh will use default logic
 	updated.LastError = nil
 	updated.UpdatedAt = now
+	if m.shouldRefresh(updated, now) {
+		updated.NextRefreshAfter = now.Add(refreshIneffectiveBackoff)
+	}
 	_, _ = m.Update(ctx, updated)
 }
 
@@ -3482,11 +3490,11 @@ func (m *Manager) HttpRequest(ctx context.Context, auth *Auth, req *http.Request
 
 // AuthCooldownSnapshot captures the cooldown-relevant runtime state for a single auth entry.
 type AuthCooldownSnapshot struct {
-	AuthID         string                  `json:"auth_id"`
-	Unavailable    bool                    `json:"unavailable,omitempty"`
+	AuthID         string                 `json:"auth_id"`
+	Unavailable    bool                   `json:"unavailable,omitempty"`
 	NextRetryAfter time.Time              `json:"next_retry_after,omitempty"`
 	Quota          QuotaState             `json:"quota,omitempty"`
-	ModelStates    map[string]*ModelState  `json:"model_states,omitempty"`
+	ModelStates    map[string]*ModelState `json:"model_states,omitempty"`
 }
 
 // ExportCooldownStates returns cooldown state for all auth entries that have active cooldowns.

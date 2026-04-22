@@ -325,9 +325,16 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 // setupRoutes configures the API routes for the server.
 // It defines the endpoints and associates them with their respective handlers.
 func (s *Server) setupRoutes() {
-	s.engine.GET("/healthz", func(c *gin.Context) {
+	healthzHandler := func(c *gin.Context) {
+		if c.Request.Method == http.MethodHead {
+			c.Status(http.StatusOK)
+			return
+		}
+
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
-	})
+	}
+	s.engine.GET("/healthz", healthzHandler)
+	s.engine.HEAD("/healthz", healthzHandler)
 
 	s.engine.GET("/management.html", s.serveManagementControlPanel)
 	openaiHandlers := openai.NewOpenAIAPIHandler(s.handlers)
@@ -669,18 +676,18 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.GET("/gitlab-auth-url", s.mgmt.RequestGitLabToken)
 		mgmt.POST("/gitlab-auth-url", s.mgmt.RequestGitLabPATToken)
 		mgmt.GET("/gemini-cli-auth-url", s.mgmt.RequestGeminiCLIToken)
-			mgmt.GET("/antigravity-auth-url", s.mgmt.RequestAntigravityToken)
-			mgmt.GET("/kilo-auth-url", s.mgmt.RequestKiloToken)
-			mgmt.GET("/kimi-auth-url", s.mgmt.RequestKimiToken)
-			mgmt.GET("/iflow-auth-url", s.mgmt.RequestIFlowToken)
-			mgmt.POST("/iflow-auth-url", s.mgmt.RequestIFlowCookieToken)
-			mgmt.GET("/kiro-auth-url", s.mgmt.RequestKiroToken)
-			mgmt.GET("/cursor-auth-url", s.mgmt.RequestCursorToken)
-			mgmt.GET("/github-auth-url", s.mgmt.RequestGitHubToken)
-			mgmt.POST("/oauth-callback", s.mgmt.PostOAuthCallback)
-			mgmt.GET("/get-auth-status", s.mgmt.GetAuthStatus)
-		}
+		mgmt.GET("/antigravity-auth-url", s.mgmt.RequestAntigravityToken)
+		mgmt.GET("/kilo-auth-url", s.mgmt.RequestKiloToken)
+		mgmt.GET("/kimi-auth-url", s.mgmt.RequestKimiToken)
+		mgmt.GET("/iflow-auth-url", s.mgmt.RequestIFlowToken)
+		mgmt.POST("/iflow-auth-url", s.mgmt.RequestIFlowCookieToken)
+		mgmt.GET("/kiro-auth-url", s.mgmt.RequestKiroToken)
+		mgmt.GET("/cursor-auth-url", s.mgmt.RequestCursorToken)
+		mgmt.GET("/github-auth-url", s.mgmt.RequestGitHubToken)
+		mgmt.POST("/oauth-callback", s.mgmt.PostOAuthCallback)
+		mgmt.GET("/get-auth-status", s.mgmt.GetAuthStatus)
 	}
+}
 
 func (s *Server) managementAvailabilityMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {

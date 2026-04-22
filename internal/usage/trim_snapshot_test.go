@@ -13,20 +13,20 @@ func TestTrimSnapshot_RemovesOldDays(t *testing.T) {
 		FailureCount:  10,
 		TotalTokens:   5000,
 		RequestsByDay: map[string]int64{
-			now.Format("2006-01-02"):                          80,
-			now.AddDate(0, 0, -29).Format("2006-01-02"):      10,
-			now.AddDate(0, 0, -31).Format("2006-01-02"):      5,
-			now.AddDate(0, 0, -60).Format("2006-01-02"):      5,
+			now.Format("2006-01-02"):                    80,
+			now.AddDate(0, 0, -29).Format("2006-01-02"): 10,
+			now.AddDate(0, 0, -31).Format("2006-01-02"): 5,
+			now.AddDate(0, 0, -60).Format("2006-01-02"): 5,
 		},
 		TokensByDay: map[string]int64{
-			now.Format("2006-01-02"):                          4000,
-			now.AddDate(0, 0, -29).Format("2006-01-02"):      500,
-			now.AddDate(0, 0, -31).Format("2006-01-02"):      300,
-			now.AddDate(0, 0, -60).Format("2006-01-02"):      200,
+			now.Format("2006-01-02"):                    4000,
+			now.AddDate(0, 0, -29).Format("2006-01-02"): 500,
+			now.AddDate(0, 0, -31).Format("2006-01-02"): 300,
+			now.AddDate(0, 0, -60).Format("2006-01-02"): 200,
 		},
 		RequestsByHour: map[string]int64{"12": 50, "13": 50},
 		TokensByHour:   map[string]int64{"12": 2500, "13": 2500},
-		APIs: make(map[string]APISnapshot),
+		APIs:           make(map[string]APISnapshot),
 	}
 
 	result := TrimSnapshot(snap, 30)
@@ -105,7 +105,7 @@ func TestTrimSnapshot_DoesNotMutateInput(t *testing.T) {
 	now := time.Now()
 	snap := StatisticsSnapshot{
 		RequestsByDay: map[string]int64{
-			now.Format("2006-01-02"):                     10,
+			now.Format("2006-01-02"):                    10,
 			now.AddDate(0, 0, -60).Format("2006-01-02"): 5,
 		},
 		TokensByDay:    map[string]int64{},
