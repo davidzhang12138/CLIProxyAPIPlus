@@ -94,11 +94,19 @@ CREATE TABLE IF NOT EXISTS %s (
     snapshot    JSONB NOT NULL,
     updated_at  TIMESTAMPTZ DEFAULT NOW(),
     CHECK (id = 1)
+);
+
+CREATE TABLE IF NOT EXISTS %s (
+    id          INT PRIMARY KEY DEFAULT 1,
+    snapshot    JSONB NOT NULL,
+    updated_at  TIMESTAMPTZ DEFAULT NOW(),
+    CHECK (id = 1)
 );`,
 		s.tableName("runtime_cooldowns"),
 		s.tableName("runtime_token_metrics"),
 		s.tableName("runtime_usage_snapshot"),
 		s.tableName("runtime_auth_cooldowns"),
+		s.tableName("runtime_unhealthy_urls"),
 	)
 
 	_, err := s.db.ExecContext(ctx, ddl)
@@ -292,6 +300,38 @@ func (s *PostgresStateStore) LoadAuthCooldowns(ctx context.Context) ([]byte, err
 			return nil, nil
 		}
 		return nil, fmt.Errorf("state store: load auth cooldowns: %w", err)
+	}
+	return data, nil
+}
+
+// SaveUnhealthyURLs upserts the unhealthy URL state as a JSON blob.
+func (s *PostgresStateStore) SaveUnhealthyURLs(ctx context.Context, data []byte) error {
+	if len(data) == 0 {
+		return nil
+	}
+	_, err := s.db.ExecContext(ctx, fmt.Sprintf(
+		`INSERT INTO %s (id, snapshot, updated_at) VALUES (1, $1, NOW())
+		 ON CONFLICT (id) DO UPDATE SET snapshot = $1, updated_at = NOW()`,
+		s.tableName("runtime_unhealthy_urls"),
+	), data)
+	if err != nil {
+		return fmt.Errorf("state store: save unhealthy urls: %w", err)
+	}
+	return nil
+}
+
+// LoadUnhealthyURLs reads the stored unhealthy URL state JSON blob.
+func (s *PostgresStateStore) LoadUnhealthyURLs(ctx context.Context) ([]byte, error) {
+	var data []byte
+	err := s.db.QueryRowContext(ctx, fmt.Sprintf(
+		"SELECT snapshot FROM %s WHERE id = 1",
+		s.tableName("runtime_unhealthy_urls"),
+	)).Scan(&data)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("state store: load unhealthy urls: %w", err)
 	}
 	return data, nil
 }

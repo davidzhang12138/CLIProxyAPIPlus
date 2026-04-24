@@ -26,6 +26,10 @@ type StateStore interface {
 	SaveAuthCooldowns(ctx context.Context, data []byte) error
 	LoadAuthCooldowns(ctx context.Context) ([]byte, error)
 
+	// Unhealthy URLs (full JSON blob)
+	SaveUnhealthyURLs(ctx context.Context, data []byte) error
+	LoadUnhealthyURLs(ctx context.Context) ([]byte, error)
+
 	// Close releases resources.
 	Close() error
 }

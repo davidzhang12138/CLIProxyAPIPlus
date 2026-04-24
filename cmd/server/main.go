@@ -30,6 +30,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/managementasset"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/misc"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/registry"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/runtime/executor"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/state"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/store"
 	_ "github.com/router-for-me/CLIProxyAPI/v6/internal/translator"
@@ -814,6 +815,9 @@ func main() {
 						}
 						reqStats.MergeSnapshot(snapshot)
 					}
+
+					syncer.ExportUnhealthyURLs = executor.ExportAntigravityUnhealthyURLs
+					syncer.ImportUnhealthyURLs = executor.ImportAntigravityUnhealthyURLs
 
 					initCtx, initCancel := context.WithTimeout(context.Background(), 30*time.Second)
 					if initErr := stateStore.Init(initCtx); initErr != nil {

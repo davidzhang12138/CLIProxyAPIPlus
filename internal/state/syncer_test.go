@@ -14,6 +14,7 @@ type mockStateStore struct {
 	metrics       []TokenMetricsEntry
 	usageSnapshot []byte
 	authCooldowns []byte
+	unhealthyURLs []byte
 	initErr       error
 	saveErr       error
 	loadErr       error
@@ -113,6 +114,31 @@ func (m *mockStateStore) LoadAuthCooldowns(_ context.Context) ([]byte, error) {
 	}
 	out := make([]byte, len(m.authCooldowns))
 	copy(out, m.authCooldowns)
+	return out, nil
+}
+
+func (m *mockStateStore) SaveUnhealthyURLs(_ context.Context, data []byte) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.saveErr != nil {
+		return m.saveErr
+	}
+	m.unhealthyURLs = make([]byte, len(data))
+	copy(m.unhealthyURLs, data)
+	return nil
+}
+
+func (m *mockStateStore) LoadUnhealthyURLs(_ context.Context) ([]byte, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.loadErr != nil {
+		return nil, m.loadErr
+	}
+	if m.unhealthyURLs == nil {
+		return nil, nil
+	}
+	out := make([]byte, len(m.unhealthyURLs))
+	copy(out, m.unhealthyURLs)
 	return out, nil
 }
 

@@ -31,6 +31,10 @@ func (s *stubStateStore) SaveAuthCooldowns(context.Context, []byte) error { retu
 func (s *stubStateStore) LoadAuthCooldowns(context.Context) ([]byte, error) {
 	return nil, nil
 }
+func (s *stubStateStore) SaveUnhealthyURLs(context.Context, []byte) error { return nil }
+func (s *stubStateStore) LoadUnhealthyURLs(context.Context) ([]byte, error) {
+	return nil, nil
+}
 func (s *stubStateStore) Close() error { return nil }
 
 func TestNewStateStoreWithRetryConfigRetriesUntilSuccess(t *testing.T) {

@@ -17,6 +17,7 @@ import (
 	"math/rand"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -92,6 +93,7 @@ var (
 	antigravityShortCooldownByAuth    sync.Map
 	antigravityCreditsBalanceByAuth   sync.Map // auth.ID → antigravityCreditsBalance
 	antigravityCreditsHintRefreshByID sync.Map // auth.ID → *antigravityCreditsHintRefreshState
+	antigravityUnhealthyBaseURLs     sync.Map // baseURL → struct{}
 	antigravityQuotaExhaustedKeywords = []string{
 		"quota_exhausted",
 		"quota exhausted",
@@ -526,6 +528,7 @@ func (e *AntigravityExecutor) Execute(ctx context.Context, auth *cliproxyauth.Au
 	useCredits := cliproxyauth.AntigravityCreditsRequested(ctx) && antigravityCreditsRetryEnabled(e.cfg)
 
 	baseURLs := antigravityBaseURLFallbackOrder(auth)
+	baseURLs = antigravityFilterHealthyBaseURLs(baseURLs)
 	httpClient := newAntigravityHTTPClient(ctx, e.cfg, auth, 0)
 	attempts := antigravityRetryAttempts(auth, e.cfg)
 
@@ -559,6 +562,7 @@ attemptLoop:
 				lastStatus = 0
 				lastBody = nil
 				lastErr = errDo
+				markAntigravityBaseURLUnhealthy(baseURL)
 				if idx+1 < len(baseURLs) {
 					log.Debugf("antigravity executor: request error on base url %s, retrying with fallback base url: %s", baseURL, baseURLs[idx+1])
 					continue
@@ -624,6 +628,7 @@ attemptLoop:
 					continue attemptLoop
 				}
 				if antigravityShouldRetryNoCapacity(httpResp.StatusCode, bodyBytes) {
+					markAntigravityBaseURLUnhealthy(baseURL)
 					if idx+1 < len(baseURLs) {
 						log.Debugf("antigravity executor: no capacity on base url %s, retrying with fallback base url: %s", baseURL, baseURLs[idx+1])
 						continue
@@ -723,6 +728,7 @@ func (e *AntigravityExecutor) executeClaudeNonStream(ctx context.Context, auth *
 	useCredits := cliproxyauth.AntigravityCreditsRequested(ctx) && antigravityCreditsRetryEnabled(e.cfg)
 
 	baseURLs := antigravityBaseURLFallbackOrder(auth)
+	baseURLs = antigravityFilterHealthyBaseURLs(baseURLs)
 	httpClient := newAntigravityHTTPClient(ctx, e.cfg, auth, 0)
 
 	attempts := antigravityRetryAttempts(auth, e.cfg)
@@ -756,6 +762,7 @@ attemptLoop:
 				lastStatus = 0
 				lastBody = nil
 				lastErr = errDo
+				markAntigravityBaseURLUnhealthy(baseURL)
 				if idx+1 < len(baseURLs) {
 					log.Debugf("antigravity executor: request error on base url %s, retrying with fallback base url: %s", baseURL, baseURLs[idx+1])
 					continue
@@ -782,6 +789,7 @@ attemptLoop:
 					lastStatus = 0
 					lastBody = nil
 					lastErr = errRead
+					markAntigravityBaseURLUnhealthy(baseURL)
 					if idx+1 < len(baseURLs) {
 						log.Debugf("antigravity executor: read error on base url %s, retrying with fallback base url: %s", baseURL, baseURLs[idx+1])
 						continue
@@ -834,6 +842,7 @@ attemptLoop:
 					continue attemptLoop
 				}
 				if antigravityShouldRetryNoCapacity(httpResp.StatusCode, bodyBytes) {
+					markAntigravityBaseURLUnhealthy(baseURL)
 					if idx+1 < len(baseURLs) {
 						log.Debugf("antigravity executor: no capacity on base url %s, retrying with fallback base url: %s", baseURL, baseURLs[idx+1])
 						continue
@@ -1183,6 +1192,7 @@ func (e *AntigravityExecutor) ExecuteStream(ctx context.Context, auth *cliproxya
 	useCredits := cliproxyauth.AntigravityCreditsRequested(ctx) && antigravityCreditsRetryEnabled(e.cfg)
 
 	baseURLs := antigravityBaseURLFallbackOrder(auth)
+	baseURLs = antigravityFilterHealthyBaseURLs(baseURLs)
 	httpClient := newAntigravityHTTPClient(ctx, e.cfg, auth, 0)
 
 	attempts := antigravityRetryAttempts(auth, e.cfg)
@@ -1215,6 +1225,7 @@ attemptLoop:
 				lastStatus = 0
 				lastBody = nil
 				lastErr = errDo
+				markAntigravityBaseURLUnhealthy(baseURL)
 				if idx+1 < len(baseURLs) {
 					log.Debugf("antigravity executor: request error on base url %s, retrying with fallback base url: %s", baseURL, baseURLs[idx+1])
 					continue
@@ -1241,6 +1252,7 @@ attemptLoop:
 					lastStatus = 0
 					lastBody = nil
 					lastErr = errRead
+					markAntigravityBaseURLUnhealthy(baseURL)
 					if idx+1 < len(baseURLs) {
 						log.Debugf("antigravity executor: read error on base url %s, retrying with fallback base url: %s", baseURL, baseURLs[idx+1])
 						continue
@@ -1293,6 +1305,7 @@ attemptLoop:
 					continue attemptLoop
 				}
 				if antigravityShouldRetryNoCapacity(httpResp.StatusCode, bodyBytes) {
+					markAntigravityBaseURLUnhealthy(baseURL)
 					if idx+1 < len(baseURLs) {
 						log.Debugf("antigravity executor: no capacity on base url %s, retrying with fallback base url: %s", baseURL, baseURLs[idx+1])
 						continue
@@ -1438,6 +1451,7 @@ func (e *AntigravityExecutor) CountTokens(ctx context.Context, auth *cliproxyaut
 	payload = deleteJSONField(payload, "request.safetySettings")
 
 	baseURLs := antigravityBaseURLFallbackOrder(auth)
+	baseURLs = antigravityFilterHealthyBaseURLs(baseURLs)
 	httpClient := newAntigravityHTTPClient(ctx, e.cfg, auth, 0)
 
 	var authID, authLabel, authType, authValue string
@@ -1503,6 +1517,7 @@ func (e *AntigravityExecutor) CountTokens(ctx context.Context, auth *cliproxyaut
 			lastStatus = 0
 			lastBody = nil
 			lastErr = errDo
+			markAntigravityBaseURLUnhealthy(baseURL)
 			if idx+1 < len(baseURLs) {
 				log.Debugf("antigravity executor: request error on base url %s, retrying with fallback base url: %s", baseURL, baseURLs[idx+1])
 				continue
@@ -2192,6 +2207,64 @@ func markAntigravityShortCooldown(auth *cliproxyauth.Auth, modelName string, now
 		return
 	}
 	antigravityShortCooldownByAuth.Store(key, now.Add(duration))
+}
+
+func markAntigravityBaseURLUnhealthy(baseURL string) {
+	antigravityUnhealthyBaseURLs.Store(baseURL, struct{}{})
+	log.Debugf("antigravity executor: marked base url %s as unhealthy", baseURL)
+}
+
+func antigravityFilterHealthyBaseURLs(urls []string) []string {
+	healthy := make([]string, 0, len(urls))
+	for _, u := range urls {
+		if _, unhealthy := antigravityUnhealthyBaseURLs.Load(u); !unhealthy {
+			healthy = append(healthy, u)
+		}
+	}
+	if len(healthy) == 0 {
+		antigravityUnhealthyBaseURLs.Range(func(key, _ any) bool {
+			antigravityUnhealthyBaseURLs.Delete(key)
+			return true
+		})
+		log.Debug("antigravity executor: all base urls unhealthy, reset all marks")
+		return urls
+	}
+	if len(healthy) < len(urls) {
+		skipped := len(urls) - len(healthy)
+		log.Debugf("antigravity executor: skipping %d unhealthy base url(s)", skipped)
+	}
+	return healthy
+}
+
+// ExportAntigravityUnhealthyURLs serialises the unhealthy URL set to JSON for persistence.
+func ExportAntigravityUnhealthyURLs() []byte {
+	var urls []string
+	antigravityUnhealthyBaseURLs.Range(func(key, _ any) bool {
+		if u, ok := key.(string); ok {
+			urls = append(urls, u)
+		}
+		return true
+	})
+	sort.Strings(urls)
+	data, err := json.Marshal(urls)
+	if err != nil {
+		log.Warnf("antigravity executor: marshal unhealthy urls: %v", err)
+		return nil
+	}
+	return data
+}
+
+// ImportAntigravityUnhealthyURLs restores the unhealthy URL set from persisted JSON.
+func ImportAntigravityUnhealthyURLs(data []byte) {
+	var urls []string
+	if err := json.Unmarshal(data, &urls); err != nil {
+		log.Warnf("antigravity executor: unmarshal unhealthy urls: %v", err)
+		return
+	}
+	for _, u := range urls {
+		antigravityUnhealthyBaseURLs.Store(u, struct{}{})
+	}
+	log.Infof("antigravity executor: restored %d unhealthy url(s)", len(urls))
 }
 
 func antigravityNoCapacityRetryDelay(attempt int) time.Duration {

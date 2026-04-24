@@ -28,6 +28,8 @@ type Syncer struct {
 	ImportUsage         func([]byte)  // restore from JSON snapshot
 	ExportAuthCooldowns func() []byte // auth cooldown state as JSON
 	ImportAuthCooldowns func([]byte)  // restore auth cooldown state
+	ExportUnhealthyURLs func() []byte // unhealthy URL state as JSON
+	ImportUnhealthyURLs func([]byte)  // restore unhealthy URL state
 }
 
 // NewSyncer creates a new state syncer.
@@ -83,6 +85,16 @@ func (s *Syncer) LoadState(ctx context.Context) {
 		} else if len(data) > 0 {
 			s.ImportAuthCooldowns(data)
 			log.Infof("state syncer: restored auth cooldown state (%d bytes)", len(data))
+		}
+	}
+
+	if s.ImportUnhealthyURLs != nil {
+		data, err := s.store.LoadUnhealthyURLs(ctx)
+		if err != nil {
+			log.Warnf("state syncer: failed to load unhealthy urls: %v", err)
+		} else if len(data) > 0 {
+			s.ImportUnhealthyURLs(data)
+			log.Infof("state syncer: restored unhealthy url state (%d bytes)", len(data))
 		}
 	}
 }
@@ -148,6 +160,13 @@ func (s *Syncer) flush() {
 		data := s.ExportAuthCooldowns()
 		if err := s.store.SaveAuthCooldowns(ctx, data); err != nil {
 			log.Warnf("state syncer: flush auth cooldowns failed: %v", err)
+		}
+	}
+
+	if s.ExportUnhealthyURLs != nil {
+		data := s.ExportUnhealthyURLs()
+		if err := s.store.SaveUnhealthyURLs(ctx, data); err != nil {
+			log.Warnf("state syncer: flush unhealthy urls failed: %v", err)
 		}
 	}
 }
