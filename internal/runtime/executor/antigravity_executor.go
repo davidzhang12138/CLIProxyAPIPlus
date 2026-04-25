@@ -93,7 +93,7 @@ var (
 	antigravityShortCooldownByAuth    sync.Map
 	antigravityCreditsBalanceByAuth   sync.Map // auth.ID → antigravityCreditsBalance
 	antigravityCreditsHintRefreshByID sync.Map // auth.ID → *antigravityCreditsHintRefreshState
-	antigravityUnhealthyBaseURLs     sync.Map // baseURL → struct{}
+	antigravityUnhealthyBaseURLs      sync.Map // baseURL → struct{}
 	antigravityQuotaExhaustedKeywords = []string{
 		"quota_exhausted",
 		"quota exhausted",
