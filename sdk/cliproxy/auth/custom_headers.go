@@ -2,6 +2,25 @@ package auth
 
 import "strings"
 
+func ApplyProxyURLFromMetadata(auth *Auth) {
+	if auth == nil || len(auth.Metadata) == 0 {
+		return
+	}
+
+	for _, key := range []string{"proxy_url", "proxy-url"} {
+		raw, ok := auth.Metadata[key]
+		if !ok || raw == nil {
+			continue
+		}
+		value, ok := raw.(string)
+		if !ok {
+			continue
+		}
+		auth.ProxyURL = strings.TrimSpace(value)
+		return
+	}
+}
+
 func ExtractCustomHeadersFromMetadata(metadata map[string]any) map[string]string {
 	if len(metadata) == 0 {
 		return nil

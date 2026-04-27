@@ -21,7 +21,6 @@ import (
 
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/browser"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/util"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -55,12 +54,13 @@ type SSOOIDCClient struct {
 
 // NewSSOOIDCClient creates a new SSO OIDC client.
 func NewSSOOIDCClient(cfg *config.Config) *SSOOIDCClient {
-	client := &http.Client{Timeout: 30 * time.Second}
-	if cfg != nil {
-		client = util.SetProxy(&cfg.SDKConfig, client)
-	}
+	return NewSSOOIDCClientWithProxyURL(cfg, "")
+}
+
+// NewSSOOIDCClientWithProxyURL creates a new SSO OIDC client with an auth-scoped proxy override.
+func NewSSOOIDCClientWithProxyURL(cfg *config.Config, proxyURL string) *SSOOIDCClient {
 	return &SSOOIDCClient{
-		httpClient: client,
+		httpClient: newHTTPClientWithProxyURL(cfg, proxyURL, 30*time.Second),
 		cfg:        cfg,
 	}
 }

@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/util"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -49,13 +48,14 @@ type KiroOAuth struct {
 
 // NewKiroOAuth creates a new Kiro OAuth handler.
 func NewKiroOAuth(cfg *config.Config) *KiroOAuth {
-	client := &http.Client{Timeout: 30 * time.Second}
-	if cfg != nil {
-		client = util.SetProxy(&cfg.SDKConfig, client)
-	}
+	return NewKiroOAuthWithProxyURL(cfg, "")
+}
+
+// NewKiroOAuthWithProxyURL creates a new Kiro OAuth handler with an auth-scoped proxy override.
+func NewKiroOAuthWithProxyURL(cfg *config.Config, proxyURL string) *KiroOAuth {
 	fp := GlobalFingerprintManager().GetFingerprint("login")
 	return &KiroOAuth{
-		httpClient:  client,
+		httpClient:  newHTTPClientWithProxyURL(cfg, proxyURL, 30*time.Second),
 		cfg:         cfg,
 		machineID:   fp.KiroHash,
 		kiroVersion: fp.KiroVersion,

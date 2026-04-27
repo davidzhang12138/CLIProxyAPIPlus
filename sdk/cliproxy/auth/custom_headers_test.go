@@ -48,3 +48,17 @@ func TestApplyCustomHeadersFromMetadata(t *testing.T) {
 		t.Fatalf("keep = %q, want %q", got, "1")
 	}
 }
+
+func TestApplyProxyURLFromMetadata(t *testing.T) {
+	auth := &Auth{
+		Metadata: map[string]any{
+			"proxy_url": "  socks5://proxy.example.com:1080  ",
+		},
+	}
+
+	ApplyProxyURLFromMetadata(auth)
+
+	if got := auth.ProxyURL; got != "socks5://proxy.example.com:1080" {
+		t.Fatalf("ProxyURL = %q, want %q", got, "socks5://proxy.example.com:1080")
+	}
+}
