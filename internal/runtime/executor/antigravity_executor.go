@@ -606,7 +606,10 @@ attemptLoop:
 					if useCredits && antigravityHasExplicitCreditsBalanceExhaustedReason(bodyBytes) {
 						markAntigravityCreditsPermanentlyDisabled(auth)
 					}
-					// No credits logic - just fall through to error return below
+					if decision.retryAfter != nil && *decision.retryAfter > 0 {
+						markAntigravityShortCooldown(auth, baseModel, time.Now(), *decision.retryAfter)
+						log.Debugf("antigravity executor: quota exhausted cooldown (%s) for model %s, recorded cooldown", *decision.retryAfter, baseModel)
+					}
 				}
 			}
 
@@ -822,7 +825,10 @@ attemptLoop:
 						if useCredits && antigravityHasExplicitCreditsBalanceExhaustedReason(bodyBytes) {
 							markAntigravityCreditsPermanentlyDisabled(auth)
 						}
-						// No credits logic - just fall through to error return below
+						if decision.retryAfter != nil && *decision.retryAfter > 0 {
+							markAntigravityShortCooldown(auth, baseModel, time.Now(), *decision.retryAfter)
+							log.Debugf("antigravity executor: quota exhausted cooldown (%s) for model %s, recorded cooldown", *decision.retryAfter, baseModel)
+						}
 					}
 				}
 
@@ -1285,7 +1291,10 @@ attemptLoop:
 						if useCredits && antigravityHasExplicitCreditsBalanceExhaustedReason(bodyBytes) {
 							markAntigravityCreditsPermanentlyDisabled(auth)
 						}
-						// No credits logic - just fall through to error return below
+						if decision.retryAfter != nil && *decision.retryAfter > 0 {
+							markAntigravityShortCooldown(auth, baseModel, time.Now(), *decision.retryAfter)
+							log.Debugf("antigravity executor: quota exhausted cooldown (%s) for model %s, recorded cooldown", *decision.retryAfter, baseModel)
+						}
 					}
 				}
 
