@@ -224,3 +224,53 @@ func TestManager_ReconcileRegistryModelStates_RestoresActiveCooldownAfterRegistr
 		t.Fatalf("GetModelCount() after rebuild reconcile = %d, want 0", got)
 	}
 }
+
+func TestManager_RestoreCooldownStates_ReappliesRegistrySuppression(t *testing.T) {
+	ctx := context.Background()
+	manager := NewManager(nil, &RoundRobinSelector{}, nil)
+
+	const (
+		authID = "restore-cooldown-auth"
+		model  = "restore-cooldown-model"
+	)
+
+	if _, errRegister := manager.Register(ctx, &Auth{
+		ID:       authID,
+		Provider: "gemini",
+		Status:   StatusActive,
+	}); errRegister != nil {
+		t.Fatalf("register auth: %v", errRegister)
+	}
+
+	reg := registry.GetGlobalRegistry()
+	reg.RegisterClient(authID, "gemini", []*registry.ModelInfo{{ID: model}})
+	t.Cleanup(func() {
+		reg.UnregisterClient(authID)
+	})
+
+	nextRetry := time.Now().Add(30 * time.Minute)
+	restored := manager.RestoreCooldownStates([]AuthCooldownSnapshot{{
+		AuthID: authID,
+		ModelStates: map[string]*ModelState{
+			model: {
+				Status:         StatusError,
+				StatusMessage:  "quota",
+				Unavailable:    true,
+				NextRetryAfter: nextRetry,
+				Quota: QuotaState{
+					Exceeded:      true,
+					Reason:        "quota",
+					NextRecoverAt: nextRetry,
+					BackoffLevel:  1,
+				},
+			},
+		},
+	}})
+	if restored != 1 {
+		t.Fatalf("RestoreCooldownStates() = %d, want 1", restored)
+	}
+
+	if got := reg.GetModelCount(model); got != 0 {
+		t.Fatalf("GetModelCount() after restore = %d, want 0", got)
+	}
+}

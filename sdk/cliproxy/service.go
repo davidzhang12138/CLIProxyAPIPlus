@@ -5,6 +5,7 @@ package cliproxy
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -91,6 +92,10 @@ type Service struct {
 
 	// wsGateway manages websocket Gemini providers.
 	wsGateway *wsrelay.Manager
+
+	// startupAuthCooldownData stores persisted auth cooldown state until the
+	// initial auth snapshot has been loaded into the manager and registry.
+	startupAuthCooldownData []byte
 }
 
 // AuthManager returns the internal auth manager for state persistence.
@@ -115,6 +120,33 @@ func (s *Service) GetWatcher() *WatcherWrapper {
 		return nil
 	}
 	return s.watcher
+}
+
+// SetStartupAuthCooldownStateData stores persisted auth cooldown snapshot data
+// for restoration during service startup after the initial auth snapshot has
+// been synchronized into the manager and registry.
+func (s *Service) SetStartupAuthCooldownStateData(data []byte) {
+	if s == nil {
+		return
+	}
+	if len(data) == 0 {
+		s.startupAuthCooldownData = nil
+		return
+	}
+	s.startupAuthCooldownData = append([]byte(nil), data...)
+}
+
+// RestoreAuthCooldownStateData applies persisted auth cooldown state to the
+// current auth manager and registry.
+func (s *Service) RestoreAuthCooldownStateData(data []byte) (int, error) {
+	if s == nil || s.coreManager == nil || len(data) == 0 {
+		return 0, nil
+	}
+	var snapshots []coreauth.AuthCooldownSnapshot
+	if err := json.Unmarshal(data, &snapshots); err != nil {
+		return 0, err
+	}
+	return s.coreManager.RestoreCooldownStates(snapshots), nil
 }
 
 // newDefaultAuthManager creates a default authentication manager with all supported providers.
@@ -216,6 +248,42 @@ func (s *Service) handleAuthUpdate(ctx context.Context, update watcher.AuthUpdat
 	default:
 		log.Debugf("received unknown auth update action: %v", update.Action)
 	}
+}
+
+func (s *Service) syncInitialAuthSnapshot(ctx context.Context, auths []*coreauth.Auth) {
+	if s == nil || s.coreManager == nil {
+		return
+	}
+	activeIDs := make(map[string]struct{}, len(auths))
+	for _, auth := range auths {
+		if auth == nil || auth.ID == "" {
+			continue
+		}
+		activeIDs[auth.ID] = struct{}{}
+		s.applyCoreAuthAddOrUpdate(ctx, auth)
+	}
+	for _, auth := range s.coreManager.List() {
+		if auth == nil || auth.ID == "" {
+			continue
+		}
+		if _, ok := activeIDs[auth.ID]; ok {
+			continue
+		}
+		s.applyCoreAuthRemoval(ctx, auth.ID)
+	}
+}
+
+func (s *Service) restoreStartupAuthCooldownState() {
+	if s == nil || len(s.startupAuthCooldownData) == 0 {
+		return
+	}
+	restored, err := s.RestoreAuthCooldownStateData(s.startupAuthCooldownData)
+	if err != nil {
+		log.Warnf("state syncer: unmarshal auth cooldowns: %v", err)
+	} else {
+		log.Infof("state syncer: restored cooldown state for %d auth entries", restored)
+	}
+	s.startupAuthCooldownData = nil
 }
 
 func (s *Service) ensureWebsocketGateway() {
@@ -728,6 +796,10 @@ func (s *Service) Run(ctx context.Context) error {
 		watcherWrapper.SetAuthUpdateQueue(s.authUpdates)
 	}
 	watcherWrapper.SetConfig(s.cfg)
+
+	startupAuthCtx := coreauth.WithSkipPersist(context.Background())
+	s.syncInitialAuthSnapshot(startupAuthCtx, watcherWrapper.SnapshotAuths())
+	s.restoreStartupAuthCooldownState()
 
 	// 方案 A: 连接 Kiro 后台刷新器回调到 Watcher
 	// 当后台刷新器成功刷新 token 后，立即通知 Watcher 更新内存中的 Auth 对象

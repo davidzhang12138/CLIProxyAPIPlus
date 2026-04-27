@@ -3824,10 +3824,10 @@ func (m *Manager) ExportCooldownStates() []AuthCooldownSnapshot {
 // Only entries that still exist in the manager are updated. Expired state is skipped.
 func (m *Manager) RestoreCooldownStates(snapshots []AuthCooldownSnapshot) int {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	now := time.Now()
 	restored := 0
+	restoredAuthIDs := make([]string, 0, len(snapshots))
 	for _, snap := range snapshots {
 		auth, ok := m.auths[snap.AuthID]
 		if !ok {
@@ -3860,11 +3860,17 @@ func (m *Manager) RestoreCooldownStates(snapshots []AuthCooldownSnapshot) int {
 
 		if changed {
 			restored++
+			restoredAuthIDs = append(restoredAuthIDs, auth.ID)
 			// Sync scheduler with updated auth
 			if m.scheduler != nil {
 				m.scheduler.upsertAuth(auth.Clone())
 			}
 		}
+	}
+	m.mu.Unlock()
+
+	for _, authID := range restoredAuthIDs {
+		m.ReconcileRegistryModelStates(context.Background(), authID)
 	}
 	return restored
 }

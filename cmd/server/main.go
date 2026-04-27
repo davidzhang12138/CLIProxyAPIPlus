@@ -874,21 +874,21 @@ func main() {
 					return data
 				}
 				syncer.ImportAuthCooldowns = func(data []byte) {
-					var snapshots []coreauth.AuthCooldownSnapshot
-					if err := json.Unmarshal(data, &snapshots); err != nil {
+					restored, err := service.RestoreAuthCooldownStateData(data)
+					if err != nil {
 						log.Warnf("state syncer: unmarshal auth cooldowns: %v", err)
 						return
 					}
-					restored := mgr.RestoreCooldownStates(snapshots)
 					log.Infof("state syncer: restored cooldown state for %d auth entries", restored)
 				}
 
-				// Load auth cooldown state now (after service build, before run)
+				// Defer auth cooldown restore until service startup has loaded the
+				// current auth snapshot into the manager and registry.
 				loadCtx, loadCancel := context.WithTimeout(context.Background(), 10*time.Second)
 				if data, loadErr := syncer.Store().LoadAuthCooldowns(loadCtx); loadErr != nil {
 					log.Warnf("state syncer: failed to load auth cooldowns: %v", loadErr)
 				} else if len(data) > 0 {
-					syncer.ImportAuthCooldowns(data)
+					service.SetStartupAuthCooldownStateData(data)
 				}
 				loadCancel()
 			}

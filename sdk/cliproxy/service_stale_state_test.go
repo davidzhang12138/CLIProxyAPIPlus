@@ -2,6 +2,7 @@ package cliproxy
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -97,5 +98,62 @@ func TestServiceApplyCoreAuthAddOrUpdate_DeleteReAddDoesNotInheritStaleRuntimeSt
 	}
 	if models := registry.GetGlobalRegistry().GetModelsForClient(authID); len(models) == 0 {
 		t.Fatalf("expected re-added auth to re-register models in global registry")
+	}
+}
+
+func TestServiceRestoreAuthCooldownStateData_ReappliesRegistrySuppression(t *testing.T) {
+	service := &Service{
+		cfg:         &config.Config{},
+		coreManager: coreauth.NewManager(nil, nil, nil),
+	}
+
+	const (
+		authID = "service-restore-auth"
+		model  = "service-restore-model"
+	)
+
+	if _, errRegister := service.coreManager.Register(context.Background(), &coreauth.Auth{
+		ID:       authID,
+		Provider: "gemini",
+		Status:   coreauth.StatusActive,
+	}); errRegister != nil {
+		t.Fatalf("register auth: %v", errRegister)
+	}
+	GlobalModelRegistry().RegisterClient(authID, "gemini", []*registry.ModelInfo{{ID: model}})
+	t.Cleanup(func() {
+		GlobalModelRegistry().UnregisterClient(authID)
+	})
+
+	nextRetry := time.Now().Add(20 * time.Minute)
+	data, errMarshal := json.Marshal([]coreauth.AuthCooldownSnapshot{{
+		AuthID: authID,
+		ModelStates: map[string]*coreauth.ModelState{
+			model: {
+				Status:         coreauth.StatusError,
+				StatusMessage:  "quota",
+				Unavailable:    true,
+				NextRetryAfter: nextRetry,
+				Quota: coreauth.QuotaState{
+					Exceeded:      true,
+					Reason:        "quota",
+					NextRecoverAt: nextRetry,
+					BackoffLevel:  2,
+				},
+			},
+		},
+	}})
+	if errMarshal != nil {
+		t.Fatalf("marshal cooldown snapshot: %v", errMarshal)
+	}
+
+	restored, errRestore := service.RestoreAuthCooldownStateData(data)
+	if errRestore != nil {
+		t.Fatalf("RestoreAuthCooldownStateData() error = %v", errRestore)
+	}
+	if restored != 1 {
+		t.Fatalf("RestoreAuthCooldownStateData() restored = %d, want 1", restored)
+	}
+	if got := registry.GetGlobalRegistry().GetModelCount(model); got != 0 {
+		t.Fatalf("GetModelCount() after restore = %d, want 0", got)
 	}
 }
