@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/registry"
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/executor"
@@ -159,5 +160,67 @@ func TestManager_PickNext_RebuildsSchedulerAfterModelCooldownError(t *testing.T)
 	}
 	if got == nil || got.ID != newAuth.ID {
 		t.Fatalf("pickNext() auth = %v, want %q", got, newAuth.ID)
+	}
+}
+
+func TestManager_ReconcileRegistryModelStates_RestoresActiveCooldownAfterRegistryRebuild(t *testing.T) {
+	ctx := context.Background()
+	manager := NewManager(nil, &RoundRobinSelector{}, nil)
+
+	const (
+		authID = "reconcile-rebuild-auth"
+		model  = "reconcile-rebuild-model"
+	)
+
+	nextRetry := time.Now().Add(45 * time.Minute)
+	if _, errRegister := manager.Register(ctx, &Auth{
+		ID:       authID,
+		Provider: "gemini",
+		Status:   StatusActive,
+		ModelStates: map[string]*ModelState{
+			model: {
+				Status:         StatusError,
+				StatusMessage:  "quota",
+				Unavailable:    true,
+				NextRetryAfter: nextRetry,
+				Quota: QuotaState{
+					Exceeded:      true,
+					Reason:        "quota",
+					NextRecoverAt: nextRetry,
+					BackoffLevel:  2,
+				},
+			},
+		},
+	}); errRegister != nil {
+		t.Fatalf("register auth: %v", errRegister)
+	}
+
+	reg := registry.GetGlobalRegistry()
+	reg.RegisterClient(authID, "gemini", []*registry.ModelInfo{{ID: model}})
+	t.Cleanup(func() {
+		reg.UnregisterClient(authID)
+	})
+
+	if got := reg.GetModelCount(model); got != 1 {
+		t.Fatalf("GetModelCount() before reconcile = %d, want 1", got)
+	}
+
+	manager.ReconcileRegistryModelStates(ctx, authID)
+
+	if got := reg.GetModelCount(model); got != 0 {
+		t.Fatalf("GetModelCount() after reconcile = %d, want 0", got)
+	}
+
+	reg.UnregisterClient(authID)
+	reg.RegisterClient(authID, "gemini", []*registry.ModelInfo{{ID: model}})
+
+	if got := reg.GetModelCount(model); got != 1 {
+		t.Fatalf("GetModelCount() after rebuild before reconcile = %d, want 1", got)
+	}
+
+	manager.ReconcileRegistryModelStates(ctx, authID)
+
+	if got := reg.GetModelCount(model); got != 0 {
+		t.Fatalf("GetModelCount() after rebuild reconcile = %d, want 0", got)
 	}
 }

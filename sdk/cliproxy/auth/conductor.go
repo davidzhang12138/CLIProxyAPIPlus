@@ -302,17 +302,31 @@ func (m *Manager) ReconcileRegistryModelStates(ctx context.Context, authID strin
 			if state == nil {
 				continue
 			}
+			quotaActive := state.Quota.Exceeded && state.Quota.NextRecoverAt.After(now)
+			cooldownActive := state.Unavailable && state.NextRetryAfter.After(now)
+			if quotaActive {
+				registry.GetGlobalRegistry().SetModelQuotaExceeded(authID, baseModel)
+			} else {
+				registry.GetGlobalRegistry().ClearModelQuotaExceeded(authID, baseModel)
+			}
+			if cooldownActive {
+				suspendReason := strings.TrimSpace(state.StatusMessage)
+				if quotaActive {
+					suspendReason = "quota"
+				}
+				registry.GetGlobalRegistry().SuspendClientModel(authID, baseModel, suspendReason)
+			} else {
+				registry.GetGlobalRegistry().ResumeClientModel(authID, baseModel)
+			}
 			if modelStateIsClean(state) {
 				continue
 			}
 			// Preserve model state if cooldown is still active (NextRetryAfter in the future).
 			// This prevents periodic client reloads from clearing valid cooldown/quota state.
-			if state.NextRetryAfter.After(now) || (state.Quota.Exceeded && state.Quota.NextRecoverAt.After(now)) {
+			if cooldownActive || quotaActive {
 				continue
 			}
 			resetModelState(state, now)
-			// Clear registry-side suspension since cooldown has expired.
-			registry.GetGlobalRegistry().ResumeClientModel(authID, modelKey)
 			changed = true
 		}
 		if len(auth.ModelStates) == 0 {

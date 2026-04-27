@@ -1098,9 +1098,9 @@ func (s *Service) registerModelsForAuth(a *coreauth.Auth) {
 // one auth and reconciles any concurrent auth changes that race with the
 // refresh. Callers are expected to pre-filter provider membership.
 //
-// Re-registration is deliberate: registry cooldown/suspension state is treated
-// as part of the previous registration snapshot and is cleared when the auth is
-// rebound to the refreshed model catalog.
+// Re-registration is deliberate: the refreshed model catalog is rebound in the
+// registry first, then per-model cooldown/quota state is re-synchronized from
+// the conductor via ReconcileRegistryModelStates.
 func (s *Service) refreshModelRegistrationForAuth(current *coreauth.Auth) bool {
 	if s == nil || s.coreManager == nil || current == nil || current.ID == "" {
 		return false
