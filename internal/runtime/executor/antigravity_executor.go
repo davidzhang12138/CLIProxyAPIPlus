@@ -533,7 +533,7 @@ func (e *AntigravityExecutor) Execute(ctx context.Context, auth *cliproxyauth.Au
 	useCredits := cliproxyauth.AntigravityCreditsRequested(ctx) && antigravityCreditsRetryEnabled(e.cfg)
 
 	baseURLs := antigravityBaseURLFallbackOrder(auth)
-	baseURLs = antigravityFilterHealthyBaseURLs(baseURLs)
+	baseURLs = antigravityPrioritizeHealthyBaseURLs(baseURLs)
 	httpClient := newAntigravityHTTPClient(ctx, e.cfg, auth, 0)
 	attempts := antigravityRetryAttempts(auth, e.cfg)
 
@@ -737,7 +737,7 @@ func (e *AntigravityExecutor) executeClaudeNonStream(ctx context.Context, auth *
 	useCredits := cliproxyauth.AntigravityCreditsRequested(ctx) && antigravityCreditsRetryEnabled(e.cfg)
 
 	baseURLs := antigravityBaseURLFallbackOrder(auth)
-	baseURLs = antigravityFilterHealthyBaseURLs(baseURLs)
+	baseURLs = antigravityPrioritizeHealthyBaseURLs(baseURLs)
 	httpClient := newAntigravityHTTPClient(ctx, e.cfg, auth, 0)
 
 	attempts := antigravityRetryAttempts(auth, e.cfg)
@@ -1205,7 +1205,7 @@ func (e *AntigravityExecutor) ExecuteStream(ctx context.Context, auth *cliproxya
 	useCredits := cliproxyauth.AntigravityCreditsRequested(ctx) && antigravityCreditsRetryEnabled(e.cfg)
 
 	baseURLs := antigravityBaseURLFallbackOrder(auth)
-	baseURLs = antigravityFilterHealthyBaseURLs(baseURLs)
+	baseURLs = antigravityPrioritizeHealthyBaseURLs(baseURLs)
 	httpClient := newAntigravityHTTPClient(ctx, e.cfg, auth, 0)
 
 	attempts := antigravityRetryAttempts(auth, e.cfg)
@@ -1468,7 +1468,7 @@ func (e *AntigravityExecutor) CountTokens(ctx context.Context, auth *cliproxyaut
 	payload = deleteJSONField(payload, "request.safetySettings")
 
 	baseURLs := antigravityBaseURLFallbackOrder(auth)
-	baseURLs = antigravityFilterHealthyBaseURLs(baseURLs)
+	baseURLs = antigravityPrioritizeHealthyBaseURLs(baseURLs)
 	httpClient := newAntigravityHTTPClient(ctx, e.cfg, auth, 0)
 
 	var authID, authLabel, authType, authValue string
@@ -2293,18 +2293,17 @@ func markAntigravityBaseURLUnhealthy(baseURL string) {
 }
 
 func markAntigravityBaseURLHealthy(baseURL string) {
-	if _, wasUnhealthy := antigravityUnhealthyBaseURLs.Load(baseURL); !wasUnhealthy {
+	if _, wasUnhealthy := antigravityUnhealthyBaseURLs.LoadAndDelete(baseURL); !wasUnhealthy {
 		return
 	}
-	antigravityUnhealthyBaseURLs.Delete(baseURL)
 	log.Debugf("antigravity executor: restored base url %s to healthy", baseURL)
 }
 
-func antigravityFilterHealthyBaseURLs(urls []string) []string {
+func antigravityPrioritizeHealthyBaseURLs(urls []string) []string {
 	healthy := make([]string, 0, len(urls))
 	unhealthy := make([]string, 0, len(urls))
 	for _, u := range urls {
-		if _, unhealthy := antigravityUnhealthyBaseURLs.Load(u); !unhealthy {
+		if _, isUnhealthy := antigravityUnhealthyBaseURLs.Load(u); !isUnhealthy {
 			healthy = append(healthy, u)
 			continue
 		}

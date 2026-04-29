@@ -285,7 +285,7 @@ func TestAntigravityFilterHealthyBaseURLs_DeprioritizesButKeepsUnhealthyURLs(t *
 	antigravityUnhealthyBaseURLs.Store(antigravityBaseURLProd, struct{}{})
 	antigravityUnhealthyBaseURLs.Store(antigravitySandboxBaseURLDaily, struct{}{})
 
-	got := antigravityFilterHealthyBaseURLs([]string{
+	got := antigravityPrioritizeHealthyBaseURLs([]string{
 		antigravityBaseURLDaily,
 		antigravityBaseURLProd,
 		antigravitySandboxBaseURLDaily,
@@ -317,7 +317,7 @@ func TestAntigravityMarkBaseURLHealthy_RemovesUnhealthyMark(t *testing.T) {
 		t.Fatal("expected daily base URL to be restored to healthy")
 	}
 
-	got := antigravityFilterHealthyBaseURLs([]string{
+	got := antigravityPrioritizeHealthyBaseURLs([]string{
 		antigravityBaseURLDaily,
 		antigravityBaseURLProd,
 		antigravitySandboxBaseURLDaily,
