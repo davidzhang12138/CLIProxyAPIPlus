@@ -665,6 +665,7 @@ attemptLoop:
 			}
 
 			// Success
+			markAntigravityBaseURLHealthy(baseURL)
 			if useCredits {
 				clearAntigravityCreditsFailureState(auth)
 			}
@@ -882,6 +883,7 @@ attemptLoop:
 			}
 
 			// Stream success
+			markAntigravityBaseURLHealthy(baseURL)
 			if useCredits {
 				clearAntigravityCreditsFailureState(auth)
 			}
@@ -1348,6 +1350,7 @@ attemptLoop:
 			}
 
 			// Stream success
+			markAntigravityBaseURLHealthy(baseURL)
 			if useCredits {
 				clearAntigravityCreditsFailureState(auth)
 			}
@@ -1551,6 +1554,7 @@ func (e *AntigravityExecutor) CountTokens(ctx context.Context, auth *cliproxyaut
 		helps.AppendAPIResponseChunk(ctx, e.cfg, bodyBytes)
 
 		if httpResp.StatusCode >= http.StatusOK && httpResp.StatusCode < http.StatusMultipleChoices {
+			markAntigravityBaseURLHealthy(baseURL)
 			count := gjson.GetBytes(bodyBytes, "totalTokens").Int()
 			translated := sdktranslator.TranslateTokenCount(respCtx, to, from, count, bodyBytes)
 			return cliproxyexecutor.Response{Payload: translated, Headers: httpResp.Header.Clone()}, nil
@@ -1833,6 +1837,7 @@ func (e *AntigravityExecutor) updateAntigravityCreditsBalance(ctx context.Contex
 		log.Debugf("antigravity executor: loadCodeAssist returned status %d, err=%v", httpResp.StatusCode, errRead)
 		return
 	}
+	markAntigravityBaseURLHealthy(baseURL)
 
 	authID := strings.TrimSpace(auth.ID)
 	paidTierID := strings.TrimSpace(gjson.GetBytes(bodyBytes, "paidTier.id").String())
@@ -2287,12 +2292,23 @@ func markAntigravityBaseURLUnhealthy(baseURL string) {
 	log.Debugf("antigravity executor: marked base url %s as unhealthy", baseURL)
 }
 
+func markAntigravityBaseURLHealthy(baseURL string) {
+	if _, wasUnhealthy := antigravityUnhealthyBaseURLs.Load(baseURL); !wasUnhealthy {
+		return
+	}
+	antigravityUnhealthyBaseURLs.Delete(baseURL)
+	log.Debugf("antigravity executor: restored base url %s to healthy", baseURL)
+}
+
 func antigravityFilterHealthyBaseURLs(urls []string) []string {
 	healthy := make([]string, 0, len(urls))
+	unhealthy := make([]string, 0, len(urls))
 	for _, u := range urls {
 		if _, unhealthy := antigravityUnhealthyBaseURLs.Load(u); !unhealthy {
 			healthy = append(healthy, u)
+			continue
 		}
+		unhealthy = append(unhealthy, u)
 	}
 	if len(healthy) == 0 {
 		antigravityUnhealthyBaseURLs.Range(func(key, _ any) bool {
@@ -2302,11 +2318,10 @@ func antigravityFilterHealthyBaseURLs(urls []string) []string {
 		log.Debug("antigravity executor: all base urls unhealthy, reset all marks")
 		return urls
 	}
-	if len(healthy) < len(urls) {
-		skipped := len(urls) - len(healthy)
-		log.Debugf("antigravity executor: skipping %d unhealthy base url(s)", skipped)
+	if len(unhealthy) > 0 {
+		log.Debugf("antigravity executor: deprioritizing %d unhealthy base url(s)", len(unhealthy))
 	}
-	return healthy
+	return append(healthy, unhealthy...)
 }
 
 // ExportAntigravityUnhealthyURLs serialises the unhealthy URL set to JSON for persistence.
@@ -2388,8 +2403,8 @@ var antigravityBaseURLFallbackOrder = func(auth *cliproxyauth.Auth) []string {
 		return []string{base}
 	}
 	return []string{
-		antigravityBaseURLProd,
 		antigravityBaseURLDaily,
+		antigravityBaseURLProd,
 		antigravitySandboxBaseURLDaily,
 	}
 }

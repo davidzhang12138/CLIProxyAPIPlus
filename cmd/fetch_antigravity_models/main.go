@@ -167,7 +167,7 @@ func fetchModels(ctx context.Context, auth *coreauth.Auth) []modelEntry {
 		return nil
 	}
 
-	baseURLs := []string{antigravityBaseURLProd, antigravityBaseURLDaily, antigravitySandboxBaseURLDaily}
+	baseURLs := []string{antigravityBaseURLDaily, antigravityBaseURLProd, antigravitySandboxBaseURLDaily}
 
 	for _, baseURL := range baseURLs {
 		modelsURL := baseURL + antigravityModelsPath

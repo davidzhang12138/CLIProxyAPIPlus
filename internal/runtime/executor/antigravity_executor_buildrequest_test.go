@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"reflect"
+	"sync"
 	"testing"
 
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
@@ -256,5 +258,76 @@ func assertSchemaSanitizedAndPropertyPreserved(t *testing.T, params map[string]a
 	}
 	if _, ok := mode["deprecated"]; ok {
 		t.Fatalf("deprecated should be removed from nested schema")
+	}
+}
+
+func TestAntigravityBaseURLFallbackOrder_DefaultsToDailyFirst(t *testing.T) {
+	auth := &cliproxyauth.Auth{}
+
+	got := antigravityBaseURLFallbackOrder(auth)
+	want := []string{
+		antigravityBaseURLDaily,
+		antigravityBaseURLProd,
+		antigravitySandboxBaseURLDaily,
+	}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("base URL fallback order = %v, want %v", got, want)
+	}
+}
+
+func TestAntigravityFilterHealthyBaseURLs_DeprioritizesButKeepsUnhealthyURLs(t *testing.T) {
+	antigravityUnhealthyBaseURLs = sync.Map{}
+	t.Cleanup(func() {
+		antigravityUnhealthyBaseURLs = sync.Map{}
+	})
+
+	antigravityUnhealthyBaseURLs.Store(antigravityBaseURLProd, struct{}{})
+	antigravityUnhealthyBaseURLs.Store(antigravitySandboxBaseURLDaily, struct{}{})
+
+	got := antigravityFilterHealthyBaseURLs([]string{
+		antigravityBaseURLDaily,
+		antigravityBaseURLProd,
+		antigravitySandboxBaseURLDaily,
+	})
+	want := []string{
+		antigravityBaseURLDaily,
+		antigravityBaseURLProd,
+		antigravitySandboxBaseURLDaily,
+	}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("filtered base URLs = %v, want %v", got, want)
+	}
+}
+
+func TestAntigravityMarkBaseURLHealthy_RemovesUnhealthyMark(t *testing.T) {
+	antigravityUnhealthyBaseURLs = sync.Map{}
+	t.Cleanup(func() {
+		antigravityUnhealthyBaseURLs = sync.Map{}
+	})
+
+	markAntigravityBaseURLUnhealthy(antigravityBaseURLDaily)
+	if _, ok := antigravityUnhealthyBaseURLs.Load(antigravityBaseURLDaily); !ok {
+		t.Fatal("expected daily base URL to be marked unhealthy")
+	}
+
+	markAntigravityBaseURLHealthy(antigravityBaseURLDaily)
+	if _, ok := antigravityUnhealthyBaseURLs.Load(antigravityBaseURLDaily); ok {
+		t.Fatal("expected daily base URL to be restored to healthy")
+	}
+
+	got := antigravityFilterHealthyBaseURLs([]string{
+		antigravityBaseURLDaily,
+		antigravityBaseURLProd,
+		antigravitySandboxBaseURLDaily,
+	})
+	want := []string{
+		antigravityBaseURLDaily,
+		antigravityBaseURLProd,
+		antigravitySandboxBaseURLDaily,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("filtered base URLs after restore = %v, want %v", got, want)
 	}
 }
