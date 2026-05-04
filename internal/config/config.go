@@ -65,6 +65,11 @@ type Config struct {
 	// UsageStatisticsEnabled toggles in-memory usage aggregation; when false, usage data is discarded.
 	UsageStatisticsEnabled bool `yaml:"usage-statistics-enabled" json:"usage-statistics-enabled"`
 
+	// RedisUsageQueueRetentionSeconds controls how long (in seconds) usage queue items
+	// are retained in memory for the Redis RESP interface (LPOP/RPOP).
+	// Default: 60. Max: 3600.
+	RedisUsageQueueRetentionSeconds int `yaml:"redis-usage-queue-retention-seconds" json:"redis-usage-queue-retention-seconds"`
+
 	// DisableCooling disables quota cooldown scheduling when true.
 	DisableCooling bool `yaml:"disable-cooling" json:"disable-cooling"`
 
@@ -693,8 +698,9 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 	cfg.LogsMaxTotalSizeMB = 0
 	cfg.ErrorLogsMaxFiles = 10
 	cfg.UsageStatisticsEnabled = false
+	cfg.RedisUsageQueueRetentionSeconds = 60
 	cfg.DisableCooling = false
-	cfg.DisableImageGeneration = false
+	cfg.DisableImageGeneration = DisableImageGenerationOff
 	cfg.Pprof.Enable = false
 	cfg.Pprof.Addr = DefaultPprofAddr
 	cfg.AmpCode.RestrictManagementToLocalhost = false // Default to false: API key auth is sufficient
@@ -754,6 +760,13 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 
 	if cfg.ErrorLogsMaxFiles < 0 {
 		cfg.ErrorLogsMaxFiles = 10
+	}
+
+	if cfg.RedisUsageQueueRetentionSeconds <= 0 {
+		cfg.RedisUsageQueueRetentionSeconds = 60
+	} else if cfg.RedisUsageQueueRetentionSeconds > 3600 {
+		log.WithField("value", cfg.RedisUsageQueueRetentionSeconds).Warn("redis-usage-queue-retention-seconds too large; clamping to 3600")
+		cfg.RedisUsageQueueRetentionSeconds = 3600
 	}
 
 	if cfg.MaxRetryCredentials < 0 {
