@@ -170,9 +170,9 @@ type StateStoreConfig struct {
 	// Enabled toggles state persistence. When false, runtime state is only in-memory.
 	Enabled bool `yaml:"enabled" json:"enabled"`
 
-	// DSN is the PostgreSQL connection string for state persistence.
-	// Independent of PGSTORE_DSN — state persistence can be enabled without
-	// switching auth/config storage to PostgreSQL.
+	// DSN is the database connection string for state persistence.
+	// Supports PostgreSQL DSN or SQLite file path (prefix with sqlite:// or use
+	// .db/.sqlite extension). Independent of PGSTORE_DSN/SQLITESTORE_PATH.
 	DSN string `yaml:"dsn" json:"-"`
 
 	// Schema is the PostgreSQL schema name (optional, defaults to public).
