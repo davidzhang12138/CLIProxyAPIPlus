@@ -69,8 +69,11 @@ func TestNewCodexStatusErrTreatsCapacityAsRetryableRateLimit(t *testing.T) {
 	if got := err.StatusCode(); got != http.StatusTooManyRequests {
 		t.Fatalf("status code = %d, want %d", got, http.StatusTooManyRequests)
 	}
-	if err.RetryAfter() != nil {
-		t.Fatalf("expected nil explicit retryAfter for capacity fallback, got %v", *err.RetryAfter())
+	if err.RetryAfter() == nil {
+		t.Fatalf("expected non-nil retryAfter for capacity error, got nil")
+	}
+	if *err.RetryAfter() != 0 {
+		t.Fatalf("expected zero retryAfter for capacity error, got %v", *err.RetryAfter())
 	}
 }
 

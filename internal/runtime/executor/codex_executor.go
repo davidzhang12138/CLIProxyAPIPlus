@@ -510,6 +510,16 @@ func (e *CodexExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Au
 					publishCodexImageToolUsage(ctx, reporter, body, data)
 					data = patchCodexCompletedOutput(data, outputItemsByIndex, outputItemsFallback)
 					translatedLine = append([]byte("data: "), data...)
+				case "response.failed":
+					if isCodexModelCapacityError(data) {
+						helps.LogWithRequestID(ctx).Debugf("codex stream: detected capacity error in SSE event")
+						reporter.PublishFailure(ctx)
+						select {
+						case out <- cliproxyexecutor.StreamChunk{Err: newCodexStatusErr(http.StatusTooManyRequests, data)}:
+						case <-ctx.Done():
+						}
+						return
+					}
 				}
 			}
 
@@ -825,13 +835,17 @@ func applyCodexHeaders(r *http.Request, auth *cliproxyauth.Auth, token string, s
 
 func newCodexStatusErr(statusCode int, body []byte) statusErr {
 	errCode := statusCode
-	if isCodexModelCapacityError(body) {
+	isCapacity := isCodexModelCapacityError(body)
+	if isCapacity {
 		errCode = http.StatusTooManyRequests
 	}
 	body = classifyCodexStatusError(errCode, body)
 	err := statusErr{code: errCode, msg: string(body)}
 	if retryAfter := parseCodexRetryAfter(errCode, body, time.Now()); retryAfter != nil {
 		err.retryAfter = retryAfter
+	} else if isCapacity {
+		zero := time.Duration(0)
+		err.retryAfter = &zero
 	}
 	return err
 }
@@ -957,6 +971,7 @@ func isCodexModelCapacityError(errorBody []byte) bool {
 	candidates := []string{
 		gjson.GetBytes(errorBody, "error.message").String(),
 		gjson.GetBytes(errorBody, "message").String(),
+		gjson.GetBytes(errorBody, "response.error.message").String(),
 		string(errorBody),
 	}
 	for _, candidate := range candidates {
