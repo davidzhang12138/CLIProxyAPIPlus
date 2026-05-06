@@ -3816,14 +3816,18 @@ func (m *Manager) HttpRequest(ctx context.Context, auth *Auth, req *http.Request
 
 // AuthCooldownSnapshot captures the cooldown-relevant runtime state for a single auth entry.
 type AuthCooldownSnapshot struct {
-	AuthID         string                 `json:"auth_id"`
-	Unavailable    bool                   `json:"unavailable,omitempty"`
-	NextRetryAfter time.Time              `json:"next_retry_after,omitempty"`
-	Quota          QuotaState             `json:"quota,omitempty"`
-	ModelStates    map[string]*ModelState `json:"model_states,omitempty"`
+	AuthID         string                  `json:"auth_id"`
+	Unavailable    bool                    `json:"unavailable,omitempty"`
+	NextRetryAfter time.Time               `json:"next_retry_after,omitempty"`
+	Quota          QuotaState              `json:"quota,omitempty"`
+	ModelStates    map[string]*ModelState   `json:"model_states,omitempty"`
+	Success        int64                   `json:"success,omitempty"`
+	Failed         int64                   `json:"failed,omitempty"`
+	RecentBuckets  []PersistedRecentBucket `json:"recent_buckets,omitempty"`
 }
 
-// ExportCooldownStates returns cooldown state for all auth entries that have active cooldowns.
+// ExportCooldownStates returns runtime state for all auth entries that have
+// active cooldowns or non-zero request counters.
 func (m *Manager) ExportCooldownStates() []AuthCooldownSnapshot {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -3841,7 +3845,8 @@ func (m *Manager) ExportCooldownStates() []AuthCooldownSnapshot {
 				break
 			}
 		}
-		if !hasState && !hasModelState {
+		hasMetrics := auth.Success > 0 || auth.Failed > 0
+		if !hasState && !hasModelState && !hasMetrics {
 			continue
 		}
 
@@ -3850,6 +3855,9 @@ func (m *Manager) ExportCooldownStates() []AuthCooldownSnapshot {
 			Unavailable:    auth.Unavailable,
 			NextRetryAfter: auth.NextRetryAfter,
 			Quota:          auth.Quota,
+			Success:        auth.Success,
+			Failed:         auth.Failed,
+			RecentBuckets:  auth.exportRecentRequests(),
 		}
 		if hasModelState {
 			snap.ModelStates = make(map[string]*ModelState, len(auth.ModelStates))
@@ -3900,6 +3908,17 @@ func (m *Manager) RestoreCooldownStates(snapshots []AuthCooldownSnapshot) int {
 				auth.ModelStates[model] = ms.Clone()
 				changed = true
 			}
+		}
+
+		// Restore request counters and recent requests ring
+		if snap.Success > 0 || snap.Failed > 0 {
+			auth.Success = snap.Success
+			auth.Failed = snap.Failed
+			changed = true
+		}
+		if len(snap.RecentBuckets) > 0 {
+			auth.restoreRecentRequests(snap.RecentBuckets)
+			changed = true
 		}
 
 		if changed {

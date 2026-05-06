@@ -120,6 +120,14 @@ type RecentRequestBucket struct {
 	Failed  int64  `json:"failed"`
 }
 
+// PersistedRecentBucket is a persistence-friendly version of recentRequestBucket
+// that retains the bucketID for accurate ring reconstruction on restore.
+type PersistedRecentBucket struct {
+	BucketID int64 `json:"bucket_id"`
+	Success  int64 `json:"success"`
+	Failed   int64 `json:"failed"`
+}
+
 // QuotaState contains limiter tracking data for a credential.
 type QuotaState struct {
 	// Exceeded indicates the credential recently hit a quota error.
@@ -212,6 +220,39 @@ func (a *Auth) RecentRequestsSnapshot(now time.Time) []RecentRequestBucket {
 	}
 
 	return out
+}
+
+func (a *Auth) exportRecentRequests() []PersistedRecentBucket {
+	if a == nil {
+		return nil
+	}
+	var out []PersistedRecentBucket
+	for _, b := range a.recentRequests.buckets {
+		if b.bucketID == 0 && b.success == 0 && b.failed == 0 {
+			continue
+		}
+		out = append(out, PersistedRecentBucket{
+			BucketID: b.bucketID,
+			Success:  b.success,
+			Failed:   b.failed,
+		})
+	}
+	return out
+}
+
+func (a *Auth) restoreRecentRequests(buckets []PersistedRecentBucket) {
+	if a == nil {
+		return
+	}
+	a.recentRequests = recentRequestRing{}
+	for _, pb := range buckets {
+		idx := recentRequestBucketIndex(pb.BucketID)
+		a.recentRequests.buckets[idx] = recentRequestBucket{
+			bucketID: pb.BucketID,
+			success:  pb.Success,
+			failed:   pb.Failed,
+		}
+	}
 }
 
 // Clone shallow copies the Auth structure, duplicating maps to avoid accidental mutation.
