@@ -479,6 +479,15 @@ func newAntigravityStatusErr(statusCode int, body []byte) statusErr {
 	return err
 }
 
+func isAntigravityStreamErrorEvent(payload []byte) bool {
+	return gjson.GetBytes(payload, "type").String() == "error"
+}
+
+func newAntigravityStreamError(payload []byte) statusErr {
+	zero := time.Duration(0)
+	return statusErr{code: http.StatusBadGateway, msg: string(payload), retryAfter: &zero}
+}
+
 // Execute performs a non-streaming request to the Antigravity API.
 func (e *AntigravityExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (resp cliproxyexecutor.Response, err error) {
 	if opts.Alt == "responses/compact" {
@@ -910,6 +919,14 @@ attemptLoop:
 					payload := helps.JSONPayload(line)
 					if payload == nil {
 						continue
+					}
+
+					if isAntigravityStreamErrorEvent(payload) {
+						helps.LogWithRequestID(ctx).Debugf("antigravity executor: detected error event in SSE stream: %s", helps.SummarizeErrorBody("application/json", payload))
+						helps.RecordAPIResponseError(ctx, e.cfg, fmt.Errorf("stream error event: %s", payload))
+						reporter.PublishFailure(ctx)
+						out <- cliproxyexecutor.StreamChunk{Err: newAntigravityStreamError(payload)}
+						return
 					}
 
 					if detail, ok := helps.ParseAntigravityStreamUsage(payload); ok {
@@ -1379,6 +1396,17 @@ attemptLoop:
 					payload := helps.JSONPayload(line)
 					if payload == nil {
 						continue
+					}
+
+					if isAntigravityStreamErrorEvent(payload) {
+						helps.LogWithRequestID(ctx).Debugf("antigravity executor: detected error event in SSE stream: %s", helps.SummarizeErrorBody("application/json", payload))
+						helps.RecordAPIResponseError(ctx, e.cfg, fmt.Errorf("stream error event: %s", payload))
+						reporter.PublishFailure(ctx)
+						select {
+						case out <- cliproxyexecutor.StreamChunk{Err: newAntigravityStreamError(payload)}:
+						case <-ctx.Done():
+						}
+						return
 					}
 
 					if detail, ok := helps.ParseAntigravityStreamUsage(payload); ok {
