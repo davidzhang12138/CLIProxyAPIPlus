@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/registry"
-	coreauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
-	"github.com/router-for-me/CLIProxyAPI/v6/sdk/config"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
+	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
+	"github.com/router-for-me/CLIProxyAPI/v7/sdk/config"
 )
 
 func TestServiceApplyCoreAuthAddOrUpdate_DeleteReAddDoesNotInheritStaleRuntimeState(t *testing.T) {
@@ -155,5 +155,34 @@ func TestServiceRestoreAuthCooldownStateData_ReappliesRegistrySuppression(t *tes
 	}
 	if got := registry.GetGlobalRegistry().GetModelCount(model); got != 0 {
 		t.Fatalf("GetModelCount() after restore = %d, want 0", got)
+	}
+}
+
+func TestForceHomeRuntimeConfigEnablesUsageStatistics(t *testing.T) {
+	cfg := &config.Config{
+		UsageStatisticsEnabled: false,
+	}
+
+	forceHomeRuntimeConfig(cfg)
+
+	if !cfg.UsageStatisticsEnabled {
+		t.Fatal("expected home runtime config to force usage statistics enabled")
+	}
+}
+
+func TestApplyHomeOverlayForcesUsageStatisticsEnabled(t *testing.T) {
+	baseCfg := &config.Config{}
+	baseCfg.Home.Enabled = true
+	service := &Service{cfg: baseCfg}
+
+	service.applyHomeOverlay(&config.Config{
+		UsageStatisticsEnabled: false,
+	})
+
+	if service.cfg == nil || !service.cfg.UsageStatisticsEnabled {
+		t.Fatal("expected home overlay to force usage statistics enabled")
+	}
+	if !service.cfg.Home.Enabled {
+		t.Fatal("expected home overlay to preserve local home settings")
 	}
 }

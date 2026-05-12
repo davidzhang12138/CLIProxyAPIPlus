@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/state"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/state"
 )
 
 // TokenMetrics holds performance metrics for a single token.

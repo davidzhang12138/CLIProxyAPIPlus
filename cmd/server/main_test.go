@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/state"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/state"
 )
 
 type stubStateStore struct{}
