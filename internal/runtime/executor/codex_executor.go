@@ -971,6 +971,10 @@ func isCodexModelCapacityError(errorBody []byte) bool {
 	if len(errorBody) == 0 {
 		return false
 	}
+	if gjson.GetBytes(errorBody, "response.error.code").String() == "server_is_overloaded" ||
+		gjson.GetBytes(errorBody, "error.code").String() == "server_is_overloaded" {
+		return true
+	}
 	candidates := []string{
 		gjson.GetBytes(errorBody, "error.message").String(),
 		gjson.GetBytes(errorBody, "message").String(),
@@ -982,8 +986,8 @@ func isCodexModelCapacityError(errorBody []byte) bool {
 		if lower == "" {
 			continue
 		}
-		if strings.Contains(lower, "selected model is at capacity") ||
-			strings.Contains(lower, "model is at capacity. please try a different model") {
+		if strings.Contains(lower, "at capacity") ||
+			strings.Contains(lower, "servers are currently overloaded") {
 			return true
 		}
 	}
