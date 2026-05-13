@@ -247,7 +247,7 @@ func BuildKiroPayload(claudeBody []byte, modelID, profileArn, origin string, isA
 	}
 
 	// Process messages and build history
-	history, currentUserMsg, currentToolResults := processMessages(messages, modelID, origin)
+	history, currentUserMsg, currentToolResults := processMessages(messages, modelID, origin, len(kiroTools) > 0)
 
 	// Build content with system prompt.
 	// Keep thinking tags on subsequent turns so multi-turn Claude sessions
@@ -613,7 +613,7 @@ func convertClaudeToolsToKiro(tools gjson.Result) []KiroToolWrapper {
 }
 
 // processMessages processes Claude messages and builds Kiro history
-func processMessages(messages gjson.Result, modelID, origin string) ([]KiroHistoryMessage, *KiroUserInputMessage, []KiroToolResult) {
+func processMessages(messages gjson.Result, modelID, origin string, toolsAvailable bool) ([]KiroHistoryMessage, *KiroUserInputMessage, []KiroToolResult) {
 	var history []KiroHistoryMessage
 	var currentUserMsg *KiroUserInputMessage
 	var currentToolResults []KiroToolResult
@@ -636,7 +636,7 @@ func processMessages(messages gjson.Result, modelID, origin string) ([]KiroHisto
 		isLastMessage := i == len(messagesArray)-1
 
 		if role == "user" {
-			userMsg, toolResults := BuildUserMessageStruct(msg, modelID, origin)
+			userMsg, toolResults := buildUserMessageStruct(msg, modelID, origin, toolsAvailable)
 			// CRITICAL: Kiro API requires content to be non-empty for ALL user messages
 			// This includes both history messages and the current message.
 			// When user message contains only tool_result (no text), content will be empty.
@@ -664,7 +664,7 @@ func processMessages(messages gjson.Result, modelID, origin string) ([]KiroHisto
 				})
 			}
 		} else if role == "assistant" {
-			assistantMsg := BuildAssistantMessageStruct(msg)
+			assistantMsg := buildAssistantMessageStruct(msg, toolsAvailable)
 			if isLastMessage {
 				history = append(history, KiroHistoryMessage{
 					AssistantResponseMessage: &assistantMsg,
@@ -810,8 +810,12 @@ func extractClaudeToolChoiceHint(claudeBody []byte) string {
 	return ""
 }
 
-// BuildUserMessageStruct builds a user message and extracts tool results
+// BuildUserMessageStruct builds a user message and extracts tool results.
 func BuildUserMessageStruct(msg gjson.Result, modelID, origin string) (KiroUserInputMessage, []KiroToolResult) {
+	return buildUserMessageStruct(msg, modelID, origin, true)
+}
+
+func buildUserMessageStruct(msg gjson.Result, modelID, origin string, toolsAvailable bool) (KiroUserInputMessage, []KiroToolResult) {
 	content := msg.Get("content")
 	var contentBuilder strings.Builder
 	var toolResults []KiroToolResult
@@ -845,6 +849,10 @@ func BuildUserMessageStruct(msg gjson.Result, modelID, origin string) (KiroUserI
 				}
 			case "tool_result":
 				toolUseID := part.Get("tool_use_id").String()
+				if !toolsAvailable {
+					contentBuilder.WriteString(formatClaudeToolResultAsText(part))
+					continue
+				}
 
 				// Skip duplicate toolUseIds
 				if seenToolUseIDs[toolUseID] {
@@ -903,8 +911,12 @@ func BuildUserMessageStruct(msg gjson.Result, modelID, origin string) (KiroUserI
 	return userMsg, toolResults
 }
 
-// BuildAssistantMessageStruct builds an assistant message with tool uses
+// BuildAssistantMessageStruct builds an assistant message with tool uses.
 func BuildAssistantMessageStruct(msg gjson.Result) KiroAssistantResponseMessage {
+	return buildAssistantMessageStruct(msg, true)
+}
+
+func buildAssistantMessageStruct(msg gjson.Result, toolsAvailable bool) KiroAssistantResponseMessage {
 	content := msg.Get("content")
 	var contentBuilder strings.Builder
 	var toolUses []KiroToolUse
@@ -919,6 +931,10 @@ func BuildAssistantMessageStruct(msg gjson.Result) KiroAssistantResponseMessage 
 				toolUseID := part.Get("id").String()
 				toolName := part.Get("name").String()
 				toolInput := part.Get("input")
+				if !toolsAvailable {
+					contentBuilder.WriteString(formatClaudeToolUseAsText(toolUseID, toolName, toolInput))
+					continue
+				}
 
 				var inputMap map[string]interface{}
 				if toolInput.IsObject() {
@@ -962,4 +978,68 @@ func BuildAssistantMessageStruct(msg gjson.Result) KiroAssistantResponseMessage 
 		Content:  finalContent,
 		ToolUses: toolUses,
 	}
+}
+
+func formatClaudeToolUseAsText(toolUseID, toolName string, toolInput gjson.Result) string {
+	var b strings.Builder
+	b.WriteString("\n\n[Tool use from previous transcript; no tools are declared for this request]\n")
+	if toolUseID != "" {
+		b.WriteString("Tool Use ID: ")
+		b.WriteString(toolUseID)
+		b.WriteByte('\n')
+	}
+	if toolName != "" {
+		b.WriteString("Tool: ")
+		b.WriteString(toolName)
+		b.WriteByte('\n')
+	}
+	if toolInput.Exists() {
+		b.WriteString("Input: ")
+		b.WriteString(toolInput.Raw)
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
+func formatClaudeToolResultAsText(part gjson.Result) string {
+	toolUseID := part.Get("tool_use_id").String()
+	resultContent := part.Get("content")
+
+	var b strings.Builder
+	b.WriteString("\n\n[Tool result from previous transcript; no tools are declared for this request]\n")
+	if toolUseID != "" {
+		b.WriteString("Tool Use ID: ")
+		b.WriteString(toolUseID)
+		b.WriteByte('\n')
+	}
+	b.WriteString("Result:\n")
+
+	wroteText := false
+	if resultContent.IsArray() {
+		for _, item := range resultContent.Array() {
+			switch {
+			case item.Get("type").String() == "text":
+				if wroteText {
+					b.WriteByte('\n')
+				}
+				b.WriteString(item.Get("text").String())
+				wroteText = true
+			case item.Type == gjson.String:
+				if wroteText {
+					b.WriteByte('\n')
+				}
+				b.WriteString(item.String())
+				wroteText = true
+			}
+		}
+	} else if resultContent.Type == gjson.String {
+		b.WriteString(resultContent.String())
+		wroteText = true
+	}
+
+	if !wroteText {
+		b.WriteString("Tool use was cancelled by the user")
+	}
+	b.WriteByte('\n')
+	return b.String()
 }
