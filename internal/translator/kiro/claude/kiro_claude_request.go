@@ -152,9 +152,13 @@ func BuildKiroPayload(claudeBody []byte, modelID, profileArn, origin string, isA
 	var maxTokens int64
 	if mt := gjson.GetBytes(claudeBody, "max_tokens"); mt.Exists() {
 		maxTokens = mt.Int()
-		if maxTokens == -1 {
+		if maxTokens == -1 || maxTokens > kiroMaxOutputTokens {
+			if maxTokens != -1 {
+				log.Debugf("kiro: max_tokens=%d exceeds Kiro limit, capping to %d", maxTokens, kiroMaxOutputTokens)
+			} else {
+				log.Debugf("kiro: max_tokens=-1 converted to %d", kiroMaxOutputTokens)
+			}
 			maxTokens = kiroMaxOutputTokens
-			log.Debugf("kiro: max_tokens=-1 converted to %d", kiroMaxOutputTokens)
 		}
 	}
 

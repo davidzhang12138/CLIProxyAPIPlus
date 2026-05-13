@@ -147,9 +147,13 @@ func BuildKiroPayloadFromOpenAI(openaiBody []byte, modelID, profileArn, origin s
 	var maxTokens int64
 	if mt := gjson.GetBytes(openaiBody, "max_tokens"); mt.Exists() {
 		maxTokens = mt.Int()
-		if maxTokens == -1 {
+		if maxTokens == -1 || maxTokens > kiroMaxOutputTokens {
+			if maxTokens != -1 {
+				log.Debugf("kiro-openai: max_tokens=%d exceeds Kiro limit, capping to %d", maxTokens, kiroMaxOutputTokens)
+			} else {
+				log.Debugf("kiro-openai: max_tokens=-1 converted to %d", kiroMaxOutputTokens)
+			}
 			maxTokens = kiroMaxOutputTokens
-			log.Debugf("kiro-openai: max_tokens=-1 converted to %d", kiroMaxOutputTokens)
 		}
 	}
 
